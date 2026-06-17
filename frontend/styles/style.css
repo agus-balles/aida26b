@@ -281,6 +281,87 @@ select:focus {
     margin-bottom: 12px;
     color: var(--danger);
 }
+
+.availability-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    align-items: end;
+    margin-bottom: 16px;
+}
+
+.availability-output {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(220px, 320px) minmax(220px, 320px);
+    gap: 16px;
+    align-items: start;
+}
+
+.availability-map {
+    position: relative;
+    min-height: 420px;
+    border: 1px solid var(--border);
+    background-color: var(--surface);
+    overflow: hidden;
+}
+
+.court-tile {
+    position: absolute;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: #d8f3dc;
+    color: var(--text);
+    font-size: 12px;
+    overflow: hidden;
+}
+
+.court-tile.selected {
+    outline: 3px solid var(--primary);
+    z-index: 2;
+}
+
+.court-tile[data-status="held"],
+.slot-btn[data-status="held"] {
+    background-color: #ffe8a3;
+}
+
+.court-tile[data-status="confirmed"],
+.slot-btn[data-status="confirmed"] {
+    background-color: #f8b4b4;
+}
+
+.court-tile[data-status="compaction_blocked"],
+.slot-btn[data-status="compaction_blocked"] {
+    background-color: #d6d8db;
+}
+
+.availability-slots,
+.availability-booking {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.slot-btn {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: #d8f3dc;
+    color: var(--text);
+}
+
+.slot-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.75;
+}
+
+@media (max-width: 900px) {
+    .availability-output {
+        grid-template-columns: 1fr;
+    }
+}
 /* Error messages dialog */
 .dialogErrorMessage{
     background-color: #dc3546;

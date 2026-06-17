@@ -15,51 +15,19 @@ function localizeText(text: LocalizedText): string {
 
 export const structure = {
   tables: {
-    students: {
+    companies: {
       columns: {
-        numero_libreta: {
-          type: 'string',
-          label: { es: 'Número de Libreta', en: 'Student ID' },
-          readonlyOnEdit: true,
-          validator: {
-            required: true,
-            pattern: '^\\d{1,4}/\\d{2}$',
-            patternMessage:
-              'must match pattern NNNN/YY (1-4 digit number, slash, 2-digit year; leading zeros optional on the number)',
-            normalize: {
-              pattern: '^0+(?=\\d)',
-              replacement: '',
-            },
-          },
+        id: {
+          type: 'number',
+          label: { es: 'ID', en: 'ID' },
+          editable: false,
         },
 
-        dni: {
+        name: {
           type: 'string',
-          label: { es: 'DNI', en: 'ID Number' },
+          label: { es: 'Nombre', en: 'Name' },
           validator: {
             required: true,
-            pattern: '^\\d{7,8}$',
-            patternMessage: 'must be 7 or 8 digits',
-          },
-        },
-
-        first_name: {
-          type: 'string',
-          label: { es: 'Nombre', en: 'First Name' },
-          validator: {
-            required: true,
-            pattern: '^\\D+$',
-            patternMessage: 'must not contain numbers',
-          },
-        },
-
-        last_name: {
-          type: 'string',
-          label: { es: 'Apellido', en: 'Last Name' },
-          validator: {
-            required: true,
-            pattern: '^\\D+$',
-            patternMessage: 'must not contain numbers',
           },
         },
 
@@ -74,49 +42,57 @@ export const structure = {
           },
         },
 
-        enrollment_date: {
+        phone: {
           type: 'string',
-          label: { es: 'Fecha de Inscripción', en: 'Enrollment Date' },
-          input: 'date',
-          validator: {
-            nullable: true,
-            minDate: '1821-08-09',
-            maxDayOffset: 0,
-          },
-        },
-
-        status: {
-          type: 'string',
-          label: { es: 'Estado', en: 'Status' },
-          input: 'select',
+          label: { es: 'Teléfono', en: 'Phone' },
           validator: {
             nullable: true,
           },
-          options: [
-            { value: 'active', label: { es: 'Activo', en: 'Active' } },
-            { value: 'graduated', label: { es: 'Graduado', en: 'Graduated' } },
-            {
-              value: 'interrupted',
-              label: { es: 'Interrumpido', en: 'Interrupted' },
-            },
-          ],
         },
-      },
-      pk: 'numero_libreta',
-      uiName: { es: 'Alumno', en: 'Student' },
-      title: { es: 'Alumnos', en: 'Students' },
-      addButtonLabel: { es: 'Agregar Alumno', en: 'Add Student' },
-    } satisfies TableStructure,
 
-    subjects: {
-      columns: {
-        cod_mat: {
+        address: {
           type: 'string',
-          label: { es: 'Código', en: 'Code' },
-          readonlyOnEdit: true,
+          label: { es: 'Dirección', en: 'Address' },
+          input: 'textarea',
+          validator: {
+            nullable: true,
+          },
+        },
+
+        city: {
+          type: 'string',
+          label: { es: 'Ciudad', en: 'City' },
+          validator: {
+            nullable: true,
+          },
+        },
+
+        timezone: {
+          type: 'string',
+          label: { es: 'Zona horaria', en: 'Timezone' },
           validator: {
             required: true,
           },
+        },
+
+        is_active: {
+          type: 'boolean',
+          label: { es: 'Activa', en: 'Active' },
+          editable: false,
+        },
+      },
+      pk: 'id',
+      uiName: { es: 'Empresa', en: 'Company' },
+      title: { es: 'Empresas', en: 'Companies' },
+      addButtonLabel: { es: 'Agregar Empresa', en: 'Add Company' },
+    } satisfies TableStructure,
+
+    sports: {
+      columns: {
+        id: {
+          type: 'number',
+          label: { es: 'ID', en: 'ID' },
+          editable: false,
         },
 
         name: {
@@ -127,143 +103,411 @@ export const structure = {
           },
         },
 
-        description: {
+        slug: {
           type: 'string',
-          label: { es: 'Descripción', en: 'Description' },
-          input: 'textarea',
+          label: { es: 'Clave', en: 'Slug' },
           validator: {
-            nullable: true,
+            required: true,
+            pattern: '^[a-z0-9_]+$',
+            patternMessage: 'must contain lowercase letters, numbers or underscores',
           },
         },
 
-        credits: {
+        is_active: {
+          type: 'boolean',
+          label: { es: 'Activo', en: 'Active' },
+          editable: false,
+        },
+      },
+      pk: 'id',
+      uiName: { es: 'Deporte', en: 'Sport' },
+      title: { es: 'Deportes', en: 'Sports' },
+      addButtonLabel: { es: 'Agregar Deporte', en: 'Add Sport' },
+    } satisfies TableStructure,
+
+    company_sports: {
+      columns: {
+        company_id: {
           type: 'number',
-          label: { es: 'Créditos', en: 'Credits' },
+          label: { es: 'Empresa', en: 'Company' },
+          readonlyOnEdit: true,
+          validator: {
+            required: true,
+            integer: true,
+            minValue: 1,
+          },
+          input: 'select',
+          foreignKey: {
+            table: 'companies',
+            valueField: 'id',
+            labelField: 'name',
+          },
+        },
+
+        sport_id: {
+          type: 'number',
+          label: { es: 'Deporte', en: 'Sport' },
+          readonlyOnEdit: true,
+          validator: {
+            required: true,
+            integer: true,
+            minValue: 1,
+          },
+          input: 'select',
+          foreignKey: {
+            table: 'sports',
+            valueField: 'id',
+            labelField: 'name',
+          },
+        },
+      },
+      pk: ['company_id', 'sport_id'],
+      uiName: { es: 'Deporte de Empresa', en: 'Company Sport' },
+      title: { es: 'Deportes por Empresa', en: 'Company Sports' },
+      addButtonLabel: { es: 'Agregar Deporte a Empresa', en: 'Add Company Sport' },
+    } satisfies TableStructure,
+
+    courts: {
+      columns: {
+        id: {
+          type: 'number',
+          label: { es: 'ID', en: 'ID' },
+          editable: false,
+        },
+
+        company_id: {
+          type: 'number',
+          label: { es: 'Empresa', en: 'Company' },
+          validator: {
+            required: true,
+            integer: true,
+            minValue: 1,
+          },
+          input: 'select',
+          foreignKey: {
+            table: 'companies',
+            valueField: 'id',
+            labelField: 'name',
+          },
+        },
+
+        parent_court_id: {
+          type: 'number',
+          label: { es: 'Cancha Padre', en: 'Parent Court' },
+          editable: false,
+        },
+
+        root_court_id: {
+          type: 'number',
+          label: { es: 'Cancha Raíz', en: 'Root Court' },
+          editable: false,
+        },
+
+        name: {
+          type: 'string',
+          label: { es: 'Nombre', en: 'Name' },
+          validator: {
+            required: true,
+          },
+        },
+
+        format: {
+          type: 'string',
+          label: { es: 'Formato', en: 'Format' },
+          input: 'select',
+          validator: {
+            required: true,
+          },
+          options: [
+            { value: 'soccer_11', label: { es: 'Fútbol 11', en: 'Soccer 11' } },
+            { value: 'soccer_8', label: { es: 'Fútbol 8', en: 'Soccer 8' } },
+            { value: 'soccer_5', label: { es: 'Fútbol 5', en: 'Soccer 5' } },
+          ],
+        },
+
+        sport_id: {
+          type: 'number',
+          label: { es: 'Deporte', en: 'Sport' },
+          validator: {
+            required: true,
+            integer: true,
+            minValue: 1,
+          },
+          input: 'select',
+          foreignKey: {
+            table: 'sports',
+            valueField: 'id',
+            labelField: 'name',
+          },
+        },
+
+        is_partitionable: {
+          type: 'string',
+          label: { es: 'Particionable', en: 'Partitionable' },
+          input: 'select',
+          validator: {
+            required: true,
+          },
+          options: [
+            { value: 'true', label: { es: 'Sí', en: 'Yes' } },
+            { value: 'false', label: { es: 'No', en: 'No' } },
+          ],
+        },
+
+        is_auto_generated: {
+          type: 'boolean',
+          label: { es: 'Autogenerada', en: 'Auto-generated' },
+          editable: false,
+        },
+
+        layout_x: {
+          type: 'number',
+          label: { es: 'X', en: 'X' },
+          editable: false,
+        },
+
+        layout_y: {
+          type: 'number',
+          label: { es: 'Y', en: 'Y' },
+          editable: false,
+        },
+
+        layout_width: {
+          type: 'number',
+          label: { es: 'Ancho', en: 'Width' },
+          editable: false,
+        },
+
+        layout_height: {
+          type: 'number',
+          label: { es: 'Alto', en: 'Height' },
+          editable: false,
+        },
+
+        is_active: {
+          type: 'boolean',
+          label: { es: 'Activa', en: 'Active' },
+          editable: false,
+        },
+      },
+      pk: 'id',
+      uiName: { es: 'Cancha', en: 'Court' },
+      title: { es: 'Canchas', en: 'Courts' },
+      addButtonLabel: { es: 'Agregar Cancha', en: 'Add Court' },
+    } satisfies TableStructure,
+
+    court_partition_rules: {
+      columns: {
+        id: {
+          type: 'number',
+          label: { es: 'ID', en: 'ID' },
+          editable: false,
+        },
+
+        source_format: {
+          type: 'string',
+          label: { es: 'Formato Origen', en: 'Source Format' },
+          validator: {
+            required: true,
+          },
+        },
+
+        target_format: {
+          type: 'string',
+          label: { es: 'Formato Destino', en: 'Target Format' },
+          validator: {
+            required: true,
+          },
+        },
+
+        child_count: {
+          type: 'number',
+          label: { es: 'Subcanchas', en: 'Child Count' },
           input: 'number',
           validator: {
-            nullable: true,
+            required: true,
             integer: true,
             minValue: 1,
           },
         },
 
-        department: {
+        layout_json: {
           type: 'string',
-          label: { es: 'Departamento', en: 'Department' },
+          label: { es: 'Layout JSON', en: 'Layout JSON' },
+          input: 'textarea',
           validator: {
-            nullable: true,
+            required: true,
           },
+        },
+
+        usable_area_ratio: {
+          type: 'number',
+          label: { es: 'Área útil', en: 'Usable Area' },
+          input: 'number',
+          validator: {
+            required: true,
+            minValue: 0.01,
+            maxValue: 1,
+          },
+        },
+
+        priority: {
+          type: 'number',
+          label: { es: 'Prioridad', en: 'Priority' },
+          input: 'number',
+          validator: {
+            required: true,
+            integer: true,
+          },
+        },
+
+        is_active: {
+          type: 'boolean',
+          label: { es: 'Activa', en: 'Active' },
+          editable: false,
         },
       },
-      pk: 'cod_mat',
-      uiName: { es: 'Materia', en: 'Subject' },
-      title: { es: 'Materias', en: 'Subjects' },
-      addButtonLabel: { es: 'Agregar Materia', en: 'Add Subject' },
+      pk: 'id',
+      uiName: { es: 'Regla de Partición', en: 'Partition Rule' },
+      title: { es: 'Reglas de Partición', en: 'Partition Rules' },
+      addButtonLabel: { es: 'Agregar Regla', en: 'Add Rule' },
     } satisfies TableStructure,
 
-    enrollments: {
-      pk: ['numero_libreta', 'cod_mat'],
-      uiName: { es: 'Inscripción', en: 'Enrollment' },
+    court_prices: {
       columns: {
-        numero_libreta: {
-          type: 'string',
-          label: { es: 'Número de Libreta', en: 'Student ID' },
-          readonlyOnEdit: true,
-          validator: {
-            required: true,
-            pattern: '^\\d{1,4}/\\d{2}$',
-            patternMessage:
-              'must match pattern NNNN/YY (1-4 digit number, slash, 2-digit year; leading zeros optional on the number)',
-            normalize: {
-              pattern: '^0+(?=\\d)',
-              replacement: '',
-            },
-          },
-          input: 'select',
-          foreignKey: {
-            table: 'students',
-            valueField: 'numero_libreta',
-            labelField: `first_name || ' ' || last_name`,
-          },
-        },
-
-        student_name: {
-          type: 'string',
-          label: { es: 'Nombre del Alumno', en: 'Student Name' },
+        id: {
+          type: 'number',
+          label: { es: 'ID', en: 'ID' },
           editable: false,
-          derivable: {
-            originTable: 'students',
-            sqlGenerationStatement:
-              `entityName.first_name || ' ' || entityName.last_name`,
-          },
         },
 
-        cod_mat: {
-          type: 'string',
-          label: { es: 'Código de Materia', en: 'Subject Code' },
-          readonlyOnEdit: true,
+        court_id: {
+          type: 'number',
+          label: { es: 'Cancha', en: 'Court' },
           validator: {
             required: true,
+            integer: true,
+            minValue: 1,
           },
           input: 'select',
           foreignKey: {
-            table: 'subjects',
-            valueField: 'cod_mat',
+            table: 'courts',
+            valueField: 'id',
             labelField: 'name',
           },
         },
 
-        subject_name: {
-          type: 'string',
-          label: { es: 'Nombre de Materia', en: 'Subject Name' },
-          editable: false,
-          derivable: {
-            originTable: 'subjects',
-            sqlGenerationStatement: `entityName.name`,
-          },
-        },
-
-        enrollment_date: {
-          type: 'string',
-          label: { es: 'Fecha de Inscripción', en: 'Enrollment Date' },
-          input: 'date',
+        sport_id: {
+          type: 'number',
+          label: { es: 'Deporte', en: 'Sport' },
           validator: {
             required: true,
-            minDate: '1821-08-09',
+            integer: true,
+            minValue: 1,
+          },
+          input: 'select',
+          foreignKey: {
+            table: 'sports',
+            valueField: 'id',
+            labelField: 'name',
           },
         },
 
-        grade: {
+        price_per_hour: {
           type: 'number',
-          label: { es: 'Nota', en: 'Grade' },
+          label: { es: 'Precio por Hora', en: 'Price per Hour' },
           input: 'number',
           validator: {
-            nullable: true,
+            required: true,
             minValue: 0,
-            maxValue: 10,
           },
         },
 
-        status: {
+        currency: {
           type: 'string',
-          label: { es: 'Estado', en: 'Status' },
-          input: 'select',
+          label: { es: 'Moneda', en: 'Currency' },
+          validator: {
+            required: true,
+            pattern: '^[A-Z]{3}$',
+            patternMessage: 'must be a 3-letter currency code',
+          },
+        },
+
+        valid_from: {
+          type: 'string',
+          label: { es: 'Válido Desde', en: 'Valid From' },
+          input: 'date',
           validator: {
             nullable: true,
           },
-          options: [
-            { value: 'enrolled', label: { es: 'Inscrito', en: 'Enrolled' } },
-            {
-              value: 'completed',
-              label: { es: 'Completado', en: 'Completed' },
-            },
-            { value: 'failed', label: { es: 'Fallido', en: 'Failed' } },
-          ],
+        },
+
+        valid_to: {
+          type: 'string',
+          label: { es: 'Válido Hasta', en: 'Valid To' },
+          input: 'date',
+          validator: {
+            nullable: true,
+          },
+        },
+
+        is_active: {
+          type: 'boolean',
+          label: { es: 'Activo', en: 'Active' },
+          editable: false,
         },
       },
-      title: { es: 'Inscripciones', en: 'Enrollments' },
-      addButtonLabel: { es: 'Agregar Inscripción', en: 'Add Enrollment' },
-      referencedTables: ['students', 'subjects'],
+      pk: 'id',
+      uiName: { es: 'Precio de Cancha', en: 'Court Price' },
+      title: { es: 'Precios', en: 'Prices' },
+      addButtonLabel: { es: 'Agregar Precio', en: 'Add Price' },
+    } satisfies TableStructure,
+
+    company_time_blocks: {
+      columns: {
+        id: {
+          type: 'number',
+          label: { es: 'ID', en: 'ID' },
+          editable: false,
+        },
+
+        company_id: {
+          type: 'number',
+          label: { es: 'Empresa', en: 'Company' },
+          validator: {
+            required: true,
+            integer: true,
+            minValue: 1,
+          },
+          input: 'select',
+          foreignKey: {
+            table: 'companies',
+            valueField: 'id',
+            labelField: 'name',
+          },
+        },
+
+        duration_minutes: {
+          type: 'number',
+          label: { es: 'Duración (min)', en: 'Duration (min)' },
+          input: 'number',
+          validator: {
+            required: true,
+            integer: true,
+            minValue: 15,
+          },
+        },
+
+        is_active: {
+          type: 'boolean',
+          label: { es: 'Activo', en: 'Active' },
+          editable: false,
+        },
+      },
+      pk: 'id',
+      uiName: { es: 'Bloque Horario', en: 'Time Block' },
+      title: { es: 'Bloques Horarios', en: 'Time Blocks' },
+      addButtonLabel: { es: 'Agregar Bloque', en: 'Add Time Block' },
     } satisfies TableStructure,
   },
 
@@ -322,8 +566,8 @@ export const structure = {
     actions: { es: 'Acciones', en: 'Actions' },
     add: { es: 'Agregar', en: 'Add' },
     appTitle: {
-      es: 'Sistema de Gestión Académica',
-      en: 'Academic Management System',
+      es: 'Sistema de Reservas de Canchas',
+      en: 'Court Booking System',
     },
     cancel: { es: 'Cancelar', en: 'Cancel' },
     delete: { es: 'Eliminar', en: 'Delete' },
@@ -338,6 +582,18 @@ export const structure = {
     addProfessor: { es: 'Agregar Profesor', en: 'Add Professor' },
     addAdmin: { es: 'Agregar Admin', en: 'Add Admin' },
     added: { es: 'agregado', en: 'added' },
+    availability: { es: 'Reservas', en: 'Bookings' },
+    company: { es: 'Empresa', en: 'Company' },
+    sport: { es: 'Deporte', en: 'Sport' },
+    date: { es: 'Fecha', en: 'Date' },
+    duration: { es: 'Duración', en: 'Duration' },
+    customerName: { es: 'Nombre del cliente', en: 'Customer Name' },
+    customerEmail: { es: 'Email del cliente', en: 'Customer Email' },
+    customerPhone: { es: 'Teléfono del cliente', en: 'Customer Phone' },
+    reserve: { es: 'Reservar', en: 'Book' },
+    confirm: { es: 'Confirmar', en: 'Confirm' },
+    bookingHeld: { es: 'Reserva bloqueada', en: 'Booking held' },
+    bookingConfirmed: { es: 'Reserva confirmada', en: 'Booking confirmed' },
 
     // Auth / session messages
     sessionExpired: { es: 'La sesión expiró', en: 'Session expired' },
@@ -360,7 +616,6 @@ export const structure = {
     onlyAdminCanCreateUsers: { es: 'Solo admin puede crear usuarios', en: 'Only admin can create users' },
     errorCreatingUser: { es: 'Error creando usuario', en: 'Error creating user' },
     noEditPermission: { es: 'No tenés permiso para editar', en: 'You do not have edit permission' },
-    studentAndUserCreated: { es: 'Alumno y usuario creados', en: 'Student and user created' },
     userAdded: { es: 'Usuario agregado', en: 'User added' },
 
     // Form labels

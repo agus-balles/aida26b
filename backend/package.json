@@ -1,7 +1,7 @@
 {
-  "name": "faculty-management-backend",
+  "name": "court-booking-backend",
   "version": "1.0.0",
-  "description": "Backend for Faculty Student Management System",
+  "description": "Backend for multi-company court booking system",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",

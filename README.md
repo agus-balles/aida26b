@@ -1,189 +1,158 @@
-# Sistema de Gestión Académica - Facultad de Ciencias Exactas UBA
+# Sistema Multiempresa de Reservas de Canchas
 
-Este proyecto implementa un sistema de gestión académica para la Facultad de Ciencias Exactas de la Universidad de Buenos Aires. El sistema permite gestionar alumnos, materias e inscripciones, con el objetivo de automatizar procesos académicos como la identificación de alumnos elegibles para títulos de grado y la generación de certificados.
+Este proyecto implementa una plataforma para gestionar empresas deportivas,
+canchas, particiones de canchas, precios, bloques de reserva y reservas con
+bloqueo transaccional.
 
 ## Características
 
-- **Gestión de Alumnos**: CRUD completo con número de libreta como identificador único
-- **Gestión de Materias**: CRUD con código de materia como identificador
-- **Gestión de Inscripciones**: Relación muchos-a-muchos entre alumnos y materias con clave compuesta
-- **Interfaz Web**: Grillas interactivas con botones de agregar, editar y eliminar
-- **API REST**: Backend en Node.js con TypeScript
-- **Base de Datos**: PostgreSQL
+- **Multiempresa**: cada empresa tiene sus propias canchas, deportes y precios.
+- **Multicancha**: una cancha grande puede operar como varias canchas chicas.
+- **Particionado automático**: al crear una cancha particionable se generan sus
+  subcanchas según reglas configuradas.
+- **Disponibilidad interactiva**: vista de mapa con canchas, horarios, precios
+  y estados de disponibilidad.
+- **Reservas transaccionales**: holds y confirmaciones con rollback ante error.
+- **Antioverlap**: bloqueo de canchas atómicas para impedir reservas
+  incompatibles.
+- **Antifragmentación**: las reservas chicas llenan primero el grupo padre ya
+  ocupado antes de abrir otro.
+- **Auth existente**: usuarios en `auth.users`, sesiones por cookie HttpOnly y
+  permisos por empresa en `auth.user_companies`.
 
-## Tecnologías Utilizadas
+## Tecnologías
 
-- **Backend**: Node.js, TypeScript, Express.js
-- **Frontend**: Vanilla TypeScript, HTML5, CSS3
-- **Base de Datos**: PostgreSQL
-- **ORM**: SQL directo con pg library
+- Backend: Node.js, TypeScript, Express.js
+- Frontend: Vanilla TypeScript, HTML5, CSS3
+- Base de datos: PostgreSQL
+- Acceso a datos: SQL directo con `pg`
 
-## Estructura del Proyecto
+## Estructura
 
-```
+```text
 /
-├── backend/           # API REST
+├── backend/              # API REST
 │   ├── src/
-│   │   └── server.ts
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── .env
-├── frontend/          # Interfaz web
-│   ├── src/
-│   │   └── app.ts
-│   ├── index.html
-│   ├── package.json
-│   └── tsconfig.json
+│   │   ├── server.ts
+│   │   └── reservations.ts
+│   └── test/
+├── frontend/             # Interfaz web
+│   ├── src/app.ts
+│   └── styles/
+├── shared/               # SSOT, tipos y validaciones compartidas
 ├── database/
-│   ├── bootstrap.sql       # Crea roles y base de datos (corre una vez)
-│   └── migrations/         # Migraciones SQL versionadas
-└── README.md
+│   ├── bootstrap.sql
+│   └── migrations/
+├── spec.md
+└── implementation-log.md
 ```
 
-## Instalación y Configuración
+## Docker
 
-### Prerrequisitos
+La forma más rápida de levantar todo:
 
-- Node.js (versión 16 o superior)
-- PostgreSQL (versión 12 o superior)
-- npm o yarn
+```bash
+docker compose up --build
+```
 
-### Base de Datos
+Esto levanta PostgreSQL, backend y frontend. La app queda en
+http://localhost:8080.
 
-1. Setup inicial (una vez por entorno, como superusuario de Postgres):
-   ```
-   psql -U postgres -f database/bootstrap.sql
-   ```
-   Esto crea los roles `aida26_owner` / `aida26_user` y la base `faculty_management`.
+Para una imagen única backend+frontend:
 
-2. Aplicar migraciones (desde `backend/`):
-   ```
-   npm run migrate
-   ```
-   Esto crea/actualiza las tablas según los archivos en `database/migrations/`.
+```bash
+docker compose -f docker-compose.combined.yml up --build
+```
 
-   Las migraciones son **forward-only** y nombradas con timestamp
-   (ej. `20260520_120000_initial_schema.sql`). Para cambiar el schema,
-   se agrega una migración nueva — nunca se editan las ya aplicadas.
+En ese modo la app queda en http://localhost:3000.
 
-   **Para deshacer un cambio:** no se edita la migración original — se escribe
-   una migración nueva que aplique el revert. Ej: si
-   `20260601_120000_add_phone.sql` hizo `ALTER TABLE students ADD COLUMN phone`,
-   para sacarla escribimos `20260602_090000_remove_phone.sql` con
-   `ALTER TABLE students DROP COLUMN phone`. Las migraciones aplicadas son
-   inmutables — modificarlas rompe la verificación de checksum.
+## Base de datos
 
-### Backend
+Setup inicial, una vez por entorno:
 
-1. Navegar al directorio `backend`
-2. Instalar dependencias: `npm install`
-3. Configurar variables de entorno en `.env`:
-   ```
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=faculty_management
-   DB_USER=tu_usuario
-   DB_PASSWORD=tu_contraseña
-   PORT=3000
-   ```
-4. Compilar solo backend: `npm run build`
-5. Ejecutar: `npm start` (servirá en http://localhost:3000 y también servirá `frontend/dist`)
+```bash
+psql -U postgres -f database/bootstrap.sql
+```
 
-### Frontend
+Aplicar migraciones desde `backend/`:
 
-1. Navegar al directorio `frontend`
-2. Instalar dependencias: `npm install`
-3. Compilar assets de producción: `npm run build`
-4. Ejecutar el servidor de desarrollo con proxy API: `npm run dev` (servirá en http://localhost:8080)
+```bash
+npm run migrate
+```
 
-### Comandos desde la raíz
+Las migraciones son forward-only y se registran con checksum. Para cambiar el
+schema se agrega una migración nueva; no se editan migraciones ya aplicadas.
 
-1. Instalar frontend y backend: `npm run install:all`
-2. Compilar frontend y backend: `npm run build`
-3. Ejecutar backend compilado: `npm start`
-4. Ejecutar backend en desarrollo: `npm run dev:backend`
-5. Ejecutar frontend en desarrollo: `npm run dev:frontend`
-6. Ejecutar tests unitarios frontend+backend: `npm test`
-7. Ejecutar tests de integración con base de datos: `npm run test:db`
-8. Ejecutar tests E2E Playwright: `npm run test:e2e`
+## Backend
 
-## Uso
+Variables principales:
 
-1. Ejecutar el backend: `npm start` en la raíz o en el directorio backend (servirá en http://localhost:3000)
-2. Abrir el navegador en http://localhost:3000
-3. Navegar entre las secciones de Alumnos, Materias e Inscripciones
-4. Usar los botones "Agregar" para crear nuevos registros
-5. Usar los botones "Editar" y "Eliminar" en cada fila de las grillas
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=faculty_management
+DB_USER=aida26_user
+DB_PASSWORD=CambiaEsta!
+PORT=3000
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=yourpassword
+ADMIN_EMAIL=admin@example.com
+```
 
-## API Endpoints
+Comandos:
 
-### Alumnos
-- `GET /api/students` - Listar todos los alumnos
-- `GET /api/students/:numero_libreta` - Obtener alumno específico
-- `POST /api/students` - Crear nuevo alumno
-- `PUT /api/students/:numero_libreta` - Actualizar alumno
-- `DELETE /api/students/:numero_libreta` - Eliminar alumno
+```bash
+npm --prefix backend run build
+npm --prefix backend run migrate
+npm --prefix backend run seed-admin
+npm --prefix backend start
+```
 
-### Materias
-- `GET /api/subjects` - Listar todas las materias
-- `GET /api/subjects/:cod_mat` - Obtener materia específica
-- `POST /api/subjects` - Crear nueva materia
-- `PUT /api/subjects/:cod_mat` - Actualizar materia
-- `DELETE /api/subjects/:cod_mat` - Eliminar materia
+## Frontend
 
-### Inscripciones
-- `GET /api/enrollments` - Listar todas las inscripciones
-- `GET /api/enrollments/:numero_libreta/:cod_mat` - Obtener inscripción específica
-- `POST /api/enrollments` - Crear nueva inscripción
-- `PUT /api/enrollments/:numero_libreta/:cod_mat` - Actualizar inscripción
-- `DELETE /api/enrollments/:numero_libreta/:cod_mat` - Eliminar inscripción
+```bash
+npm --prefix frontend run build
+npm --prefix frontend run dev
+```
 
-## Desarrollo Futuro
+El servidor de desarrollo corre en http://localhost:8080 y proxya `/api` al
+backend.
 
-- Implementar autenticación y autorización
-- Agregar validaciones más robustas
-- Implementar búsqueda y filtros
-- Generar reportes y estadísticas
-- Automatizar procesos de titulación
-- Generar certificados de alumno regular
+## Endpoints principales
 
-## Testing de Paginación (Frontend + TypeScript)
+CRUD genérico protegido por auth:
 
-La paginación del frontend usa el parámetro `page` y el backend pagina con un `limit` fijo de **20** registros por página.
-El UI muestra el estado como: `Página X de Y (Total: N)` y ofrece botones `Anterior` / `Siguiente`.
+- `/api/companies`
+- `/api/sports`
+- `/api/company_sports`
+- `/api/courts`
+- `/api/court_partition_rules`
+- `/api/court_prices`
+- `/api/company_time_blocks`
 
-### Prerrequisitos
+Endpoints específicos:
 
-- Backend y base de datos corriendo (la suite crea y borra registros de `students` vía API)
-- Frontend servido en el mismo host/puerto que el backend (por defecto `http://localhost:3000`)
-- Node.js 18+
+- `POST /api/companies/:companyId/courts`
+- `GET /api/companies/:companyId/availability`
+- `POST /api/bookings/hold`
+- `POST /api/bookings/:id/confirm`
+- `POST /api/bookings/:id/cancel`
 
-### Ejecutar los tests
+Auth:
 
-1. Instalar dependencias del frontend:
-   - `cd frontend`
-   - `npm install`
-   - `npx playwright install`
-2. (Opcional) Configurar URL base (por defecto `http://localhost:3000`):
-   - `set E2E_BASE_URL=http://localhost:3000`
-3. Ejecutar (desde `frontend/`):
-   - `npm run test:e2e`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+- `POST /api/auth/change-password`
+- `POST /api/admin/users`
+- `POST /api/admin/users/:id/reset-password`
 
-Por defecto corre en modo headless. Para ver el navegador:
+## Tests
 
-- `set E2E_HEADLESS=0`
+```bash
+npm --prefix backend test
+npm --prefix frontend test
+```
 
-### Casos cubiertos
-
-- Contenido menor a una página (ej: 5 items → 1/1)
-- Contenido exactamente una página (20 items → 1/1)
-- Contenido mayor a una página (21 items → 1/2, navegación prev/next)
-- Muchas páginas (85 items → 1/5 ... 5/5)
-
-## Contribución
-
-Este proyecto es parte del sistema académico de la Facultad de Ciencias Exactas. Para contribuciones, por favor contactar al equipo de desarrollo.
-
-## Licencia
-
-Este proyecto es propiedad de la Universidad de Buenos Aires - Facultad de Ciencias Exactas.
+En entornos sin Node local se pueden correr dentro de Docker, montando tests y
+configs como se documenta en `implementation-log.md`.

@@ -33,7 +33,7 @@ function getDerivableFields(tableName: TableKey): [string, ColumnDef][]{
 
 function getNotDerivableFields(table: TableKey): string[]{
   const columns: [string, ColumnDef][] = Object.entries(structure.tables[table].columns as Record<string, ColumnDef>);
-  const notDerivableEntries = columns.filter(([fieldName, columnDef]) => !columnDef.derivable);
+  const notDerivableEntries = columns.filter(([, columnDef]) => !columnDef.derivable && columnDef.editable !== false);
   return notDerivableEntries.map(([fieldName, column]) => fieldName);
 }
 

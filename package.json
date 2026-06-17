@@ -1,7 +1,7 @@
 {
-  "name": "faculty-management",
+  "name": "court-booking",
   "version": "1.0.0",
-  "description": "Faculty Student Management System",
+  "description": "Multi-company court booking system",
   "scripts": {
     "install:all": "npm --prefix frontend install && npm --prefix backend install",
     "build": "npm --prefix frontend run build && npm --prefix backend run build",

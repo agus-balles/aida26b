@@ -7,6 +7,13 @@ import path from 'path';
 import fs from 'fs';
 
 import * as auth from './auth';
+import {
+  cancelBooking,
+  confirmBooking,
+  createCourtWithPartitions,
+  getCompanyAvailability,
+  holdBooking,
+} from './reservations';
 
 import { getHandler } from './routes/get';
 import { putHandler } from './routes/put';
@@ -139,7 +146,7 @@ const requireAdmin: RequestHandler = async (req, res, next) => {
   return res.status(403).json({ error: 'Forbidden' });
 };
 
-const requireAcademicWrite: RequestHandler = async (req, res, next) => {
+const requireBusinessWrite: RequestHandler = async (req, res, next) => {
   const role = (req as AuthedRequest).user?.role;
 
   if (role === 'admin' || role === 'editor') {
@@ -408,99 +415,43 @@ app.post(
   }
 );
 
-/**
- * Optional special case:
- * If a student is created with `password` in the body, also create its auth user.
- * Without `password`, the request falls back to the generic postHandler below.
- */
-async function createStudentWithUser(req: Request, res: express.Response) {
-  const password = readPassword(req.body.password);
+// Reservation-specific API routes
+app.post(
+  '/api/companies/:companyId/courts',
+  requireAuth,
+  requirePasswordReady,
+  createCourtWithPartitions(pool)
+);
 
-  if (!password) {
-    return postHandler(req, res, pool);
-  }
+app.get(
+  '/api/companies/:companyId/availability',
+  requireAuth,
+  requirePasswordReady,
+  getCompanyAvailability(pool)
+);
 
-  const {
-    numero_libreta,
-    dni,
-    first_name,
-    last_name,
-    email,
-    enrollment_date,
-    status,
-  } = req.body;
+app.post(
+  '/api/bookings/hold',
+  requireAuth,
+  requirePasswordReady,
+  holdBooking(pool)
+);
 
-  const client = await pool.connect();
+app.post(
+  '/api/bookings/:id/confirm',
+  requireAuth,
+  requirePasswordReady,
+  confirmBooking(pool)
+);
 
-  try {
-    await client.query('BEGIN');
+app.post(
+  '/api/bookings/:id/cancel',
+  requireAuth,
+  requirePasswordReady,
+  cancelBooking(pool)
+);
 
-    const { passwordHash, passwordSalt } = await auth.hashPassword(password);
-
-    const userResult = await client.query<{ id: number }>(
-      `INSERT INTO auth.users
-       (username, email, password_hash, password_salt, role, must_change_password)
-       VALUES ($1, $2, $3, $4, 'reader', true)
-       RETURNING id`,
-      [
-        numero_libreta,
-        email || null,
-        passwordHash,
-        passwordSalt,
-      ]
-    );
-
-    const studentResult = await client.query(
-      `INSERT INTO students
-       (numero_libreta, dni, first_name, last_name, email, enrollment_date, status, user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [
-        numero_libreta,
-        dni,
-        first_name,
-        last_name,
-        email,
-        enrollment_date,
-        status,
-        userResult.rows[0].id,
-      ]
-    );
-
-    await client.query('COMMIT');
-
-    await audit(req, 'student_user_created', 'success', {
-      username: numero_libreta,
-      user_id: userResult.rows[0].id,
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: 'Student created successfully',
-      data: studentResult.rows[0],
-    });
-  } catch (error) {
-    await client.query('ROLLBACK');
-
-    if (isUniqueViolation(error)) {
-      return res.status(409).json({
-        success: false,
-        error: 'Student or username already exists',
-      });
-    }
-
-    console.error('Error creating student:', error);
-
-    return res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-    });
-  } finally {
-    client.release();
-  }
-}
-
-// Generic academic API routes
+// Generic business API routes
 app.get('/api/:tableName', requireAuth, requirePasswordReady, async (req, res) => {
   return getHandler(req, res, pool);
 });
@@ -509,12 +460,8 @@ app.post(
   '/api/:tableName',
   requireAuth,
   requirePasswordReady,
-  requireAcademicWrite,
+  requireBusinessWrite,
   async (req, res) => {
-    if (req.params.tableName === 'students') {
-      return createStudentWithUser(req, res);
-    }
-
     return postHandler(req, res, pool);
   }
 );
@@ -523,7 +470,7 @@ app.put(
   '/api/:tableName',
   requireAuth,
   requirePasswordReady,
-  requireAcademicWrite,
+  requireBusinessWrite,
   async (req, res) => {
     return putHandler(req, res, pool);
   }
@@ -533,7 +480,7 @@ app.delete(
   '/api/:tableName',
   requireAuth,
   requirePasswordReady,
-  requireAcademicWrite,
+  requireBusinessWrite,
   async (req, res) => {
     return deleteHandler(req, res, pool);
   }

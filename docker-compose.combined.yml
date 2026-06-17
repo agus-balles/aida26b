@@ -14,7 +14,7 @@ services:
     networks:
       - aida26_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-aida26_user}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,7 +23,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile.combined
+      dockerfile: Dockerfile
     container_name: aida26_app
     environment:
       NODE_ENV: ${NODE_ENV:-development}

@@ -1,7 +1,7 @@
 {
-  "name": "faculty-management-frontend",
+  "name": "court-booking-frontend",
   "version": "1.0.0",
-  "description": "Frontend for Faculty Student Management System",
+  "description": "Frontend for multi-company court booking system",
   "type": "module",
   "scripts": {
     "build": "webpack --config webpack.prod.js",

@@ -98,6 +98,15 @@ function normalizeValue(col: ColumnDef, value: unknown): unknown {
     : value;
 }
 
+function coerceIncomingValue(col: ColumnDef, value: unknown): unknown {
+  if (col.type !== 'number' || typeof value !== 'string' || value.trim() === '') {
+    return value;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : value;
+}
+
 function editableColumns(table: TableKey): string[] {
   return Object.entries(structure.tables[table].columns as Record<string, ColumnDef>)
     .filter(([, col]) => col.editable !== false)
@@ -132,7 +141,7 @@ function validate<T extends TableKey>(table: T, data: unknown, fields: string[])
     if (!col) { errors.push(`${key} is not a valid field`); continue; }
     if (!(key in obj)) { errors.push(`${key} is required`); continue; }
 
-    const raw = obj[key];
+    const raw = coerceIncomingValue(col, obj[key]);
     const error = validateField(table, key, raw);
     if (error) { errors.push(error); continue; }
     out[key] = isEmpty(col, raw) ? null : normalizeValue(col, raw);

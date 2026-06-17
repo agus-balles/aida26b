@@ -31,6 +31,40 @@ type AuthUser = {
   must_change_password: boolean;
 };
 
+type AvailabilityStatus =
+  | 'available'
+  | 'held'
+  | 'confirmed'
+  | 'unavailable'
+  | 'compaction_blocked';
+
+type AvailabilitySlot = {
+  starts_at: string;
+  ends_at: string;
+  status: AvailabilityStatus;
+  alternatives: number[];
+  price_total: number;
+  currency: string;
+};
+
+type AvailabilityCourt = {
+  id: number;
+  parent_court_id: number | null;
+  root_court_id: number | null;
+  name: string;
+  format: string;
+  layout_x: number;
+  layout_y: number;
+  layout_width: number;
+  layout_height: number;
+  slots: AvailabilitySlot[];
+};
+
+type AvailabilityResponse = {
+  company: { id: number; name: string; city?: string; timezone?: string };
+  courts: AvailabilityCourt[];
+};
+
 // -----------------------------------------------------------------------------
 // Localization
 // -----------------------------------------------------------------------------
@@ -82,14 +116,27 @@ const adminActions = document.getElementById('admin-actions') as HTMLElement;
 const addTeacherBtn = document.getElementById('add-teacher-btn') as HTMLButtonElement;
 const addAdminBtn = document.getElementById('add-admin-btn') as HTMLButtonElement;
 
+const recordsSection =
+  (document.getElementById('records-section') as HTMLElement | null) ??
+  document.createElement('div');
 const formContainer = document.getElementById('record-form') as HTMLElement;
 const sharedTable = document.getElementById('records-table') as HTMLTableElement;
 const navContainer = document.getElementById('table-nav') as HTMLElement;
 const menuContainer = document.getElementById('menu-nav') as HTMLElement;
 
+const availabilitySection = document.createElement('div');
+availabilitySection.id = 'availability-section';
+availabilitySection.className = 'section';
+availabilitySection.style.display = 'none';
+
+if (recordsSection.parentElement) {
+  recordsSection.insertAdjacentElement('afterend', availabilitySection);
+}
+
 const tableKeys = Object.keys(structure.tables) as TableKey[];
 const menuKeys = Object.keys(structure.menu) as Array<keyof typeof structure.menu>;
 const tableNavButtons = {} as Record<TableKey, HTMLButtonElement>;
+let availabilityNavButton: HTMLButtonElement | null = null;
 
 // -----------------------------------------------------------------------------
 // Auth/session state
@@ -97,7 +144,7 @@ const tableNavButtons = {} as Record<TableKey, HTMLButtonElement>;
 
 let currentUser: AuthUser | null = null;
 
-function canWriteAcademic(): boolean {
+function canWriteBusiness(): boolean {
   return currentUser?.role === 'admin' || currentUser?.role === 'editor';
 }
 
@@ -392,6 +439,7 @@ function mapInputToRenderer(input?: ColumnDef['input']): RendererKey {
 // -----------------------------------------------------------------------------
 
 let activeTableKey: TableKey = tableKeys[0];
+let activeCustomView: 'availability' | null = null;
 
 type FilterEntry = {
   negated: boolean;
@@ -530,6 +578,10 @@ function updateNavButtonsText(): void {
     button.textContent =
       getLocalizedText(config.title) || getLocalizedText(config.uiName) || key;
   });
+
+  if (availabilityNavButton) {
+    availabilityNavButton.textContent = getLocalizedText(structure.commonText.availability);
+  }
 }
 
 function createTableNavButtons(): void {
@@ -548,6 +600,12 @@ function createTableNavButtons(): void {
     navContainer.appendChild(button);
     tableNavButtons[key] = button;
   }
+
+  availabilityNavButton = document.createElement('button');
+  availabilityNavButton.id = 'availability-btn';
+  availabilityNavButton.textContent = getLocalizedText(structure.commonText.availability);
+  availabilityNavButton.addEventListener('click', () => showAvailabilityView());
+  navContainer.appendChild(availabilityNavButton);
 }
 
 function resetStateForTable(tableKey: TableKey): void {
@@ -570,6 +628,11 @@ function resetStateForTable(tableKey: TableKey): void {
 }
 
 function showSection(section: TableKey, pushState = true): void {
+  activeCustomView = null;
+  recordsSection.style.display = 'block';
+  availabilitySection.style.display = 'none';
+  availabilityNavButton?.classList.remove('active');
+
   if (activeTableKey !== section && pushState) {
     resetStateForTable(section);
   }
@@ -593,10 +656,10 @@ function showSection(section: TableKey, pushState = true): void {
     getLocalizedText(tableConfig.addButtonLabel) ||
     `${getLocalizedText(structure.commonText.add)} ${getLocalizedText(tableConfig.uiName)}`;
 
-  addRecordBtn.style.display = canWriteAcademic() ? 'inline-block' : 'none';
+  addRecordBtn.style.display = canWriteBusiness() ? 'inline-block' : 'none';
 
   if (adminActions) {
-    adminActions.hidden = currentUser?.role !== 'admin' || section !== 'students';
+    adminActions.hidden = currentUser?.role !== 'admin';
   }
 
   hideAnyForm();
@@ -675,7 +738,11 @@ function applyLanguageToUI(): void {
   showMenu();
 
   if (currentUser && !currentUser.must_change_password) {
-    showSection(activeTableKey, false);
+    if (activeCustomView === 'availability') {
+      showAvailabilityView();
+    } else {
+      showSection(activeTableKey, false);
+    }
   }
 }
 
@@ -715,7 +782,7 @@ function renderAnyTable<K extends TableKey>(
   const thead = sharedTable.querySelector('thead')!;
   const tbody = sharedTable.querySelector('tbody')!;
   const tableStructure = structure.tables[tableKey];
-  const showActions = canWriteAcademic();
+  const showActions = canWriteBusiness();
 
   thead.innerHTML = '';
   tbody.innerHTML = '';
@@ -891,6 +958,361 @@ function renderPagination(total: number): void {
     }
   });
   paginationContainer.appendChild(nextBtn);
+}
+
+// -----------------------------------------------------------------------------
+// Availability map
+// -----------------------------------------------------------------------------
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatSlotTime(iso: string): string {
+  return new Intl.DateTimeFormat(currentLanguage, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(iso));
+}
+
+function fillSelect(
+  select: HTMLSelectElement,
+  rows: unknown[],
+  valueField: string,
+  labelField: string
+): void {
+  select.innerHTML = '';
+
+  rows.forEach((row) => {
+    const record = row as Record<string, unknown>;
+    const option = document.createElement('option');
+    const value = String(record[valueField] ?? '');
+
+    option.value = value;
+    option.textContent = `${value} - ${String(record[labelField] ?? '')}`;
+    select.appendChild(option);
+  });
+}
+
+async function loadTimeBlockOptions(
+  companySelect: HTMLSelectElement,
+  durationSelect: HTMLSelectElement
+): Promise<void> {
+  durationSelect.innerHTML = '';
+
+  if (!companySelect.value) return;
+
+  const rows = await fetchRows(
+    `/company_time_blocks?page=1&filter_company_id=${encodeURIComponent(companySelect.value)}`
+  );
+
+  rows.forEach((row) => {
+    const record = row as Record<string, unknown>;
+    const minutes = String(record.duration_minutes ?? '');
+
+    if (!minutes) return;
+
+    const option = document.createElement('option');
+    option.value = minutes;
+    option.textContent = `${minutes} min`;
+    durationSelect.appendChild(option);
+  });
+}
+
+function showAvailabilityView(): void {
+  activeCustomView = 'availability';
+  recordsSection.style.display = 'none';
+  availabilitySection.style.display = 'block';
+  hideAnyForm();
+  setMessage();
+
+  Object.values(tableNavButtons).forEach((button) => button.classList.remove('active'));
+  availabilityNavButton?.classList.add('active');
+
+  renderAvailabilityControls();
+}
+
+async function renderAvailabilityControls(): Promise<void> {
+  availabilitySection.innerHTML = '';
+
+  const title = document.createElement('h2');
+  title.textContent = getLocalizedText(structure.commonText.availability);
+  availabilitySection.appendChild(title);
+
+  const form = document.createElement('form');
+  form.className = 'availability-controls';
+
+  const companySelect = document.createElement('select');
+  const sportSelect = document.createElement('select');
+  const dateInput = document.createElement('input');
+  const durationSelect = document.createElement('select');
+  const submitBtn = document.createElement('button');
+
+  dateInput.type = 'date';
+  dateInput.value = todayIsoDate();
+  submitBtn.type = 'submit';
+  submitBtn.textContent = getLocalizedText(structure.commonText.availability);
+
+  appendAvailabilityControl(form, structure.commonText.company, companySelect);
+  appendAvailabilityControl(form, structure.commonText.sport, sportSelect);
+  appendAvailabilityControl(form, structure.commonText.date, dateInput);
+  appendAvailabilityControl(form, structure.commonText.duration, durationSelect);
+  form.appendChild(submitBtn);
+
+  const output = document.createElement('div');
+  output.className = 'availability-output';
+
+  availabilitySection.appendChild(form);
+  availabilitySection.appendChild(output);
+
+  try {
+    const [companies, sports] = await Promise.all([
+      fetchRows('/companies?page=1'),
+      fetchRows('/sports?page=1'),
+    ]);
+
+    fillSelect(companySelect, companies, 'id', 'name');
+    fillSelect(sportSelect, sports, 'id', 'name');
+    await loadTimeBlockOptions(companySelect, durationSelect);
+
+    companySelect.addEventListener('change', async () => {
+      await loadTimeBlockOptions(companySelect, durationSelect);
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await loadAvailability(companySelect, sportSelect, dateInput, durationSelect, output);
+    });
+
+    if (companySelect.value && sportSelect.value && durationSelect.value) {
+      await loadAvailability(companySelect, sportSelect, dateInput, durationSelect, output);
+    }
+  } catch (error) {
+    const message = (error as Error).message;
+    if (message !== 'Authentication required' && message !== 'Forbidden') {
+      setMessage(getLocalizedText(structure.commonText.errorLoadingData));
+      console.error('Error loading availability controls:', error);
+    }
+  }
+}
+
+function appendAvailabilityControl(
+  form: HTMLFormElement,
+  labelText: LocalizedText,
+  input: HTMLInputElement | HTMLSelectElement,
+  required = true
+): void {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'form-group';
+
+  const label = document.createElement('label');
+  label.textContent = getLocalizedText(labelText);
+  wrapper.appendChild(label);
+
+  input.required = required;
+  wrapper.appendChild(input);
+  form.appendChild(wrapper);
+}
+
+async function loadAvailability(
+  companySelect: HTMLSelectElement,
+  sportSelect: HTMLSelectElement,
+  dateInput: HTMLInputElement,
+  durationSelect: HTMLSelectElement,
+  output: HTMLElement
+): Promise<void> {
+  if (!companySelect.value || !sportSelect.value || !dateInput.value || !durationSelect.value) {
+    return;
+  }
+
+  const params = new URLSearchParams({
+    date: dateInput.value,
+    sport_id: sportSelect.value,
+    duration_minutes: durationSelect.value,
+  });
+
+  const response = await apiFetch(
+    `/companies/${encodeURIComponent(companySelect.value)}/availability?${params.toString()}`
+  );
+
+  if (!response.ok) {
+    return showErrorMessage(await errorMessage(response));
+  }
+
+  const data = (await response.json()) as AvailabilityResponse;
+  renderAvailabilityMap(
+    data,
+    Number(sportSelect.value),
+    Number(durationSelect.value),
+    output,
+    () => loadAvailability(companySelect, sportSelect, dateInput, durationSelect, output)
+  );
+}
+
+function renderAvailabilityMap(
+  data: AvailabilityResponse,
+  sportId: number,
+  durationMinutes: number,
+  output: HTMLElement,
+  refresh: () => Promise<void>
+): void {
+  output.innerHTML = '';
+
+  const map = document.createElement('div');
+  map.className = 'availability-map';
+
+  const slotsPanel = document.createElement('div');
+  slotsPanel.className = 'availability-slots';
+
+  const bookingPanel = document.createElement('div');
+  bookingPanel.className = 'availability-booking';
+
+  output.appendChild(map);
+  output.appendChild(slotsPanel);
+  output.appendChild(bookingPanel);
+
+  let selectedCourtId = data.courts[0]?.id ?? null;
+
+  const draw = () => {
+    map.innerHTML = '';
+    slotsPanel.innerHTML = '';
+    bookingPanel.innerHTML = '';
+
+    data.courts.forEach((court) => {
+      const button = document.createElement('button');
+      const firstSlot = court.slots[0];
+
+      button.type = 'button';
+      button.className = 'court-tile';
+      button.dataset.status = firstSlot?.status ?? 'unavailable';
+      button.classList.toggle('selected', court.id === selectedCourtId);
+      button.style.left = `${Number(court.layout_x) * 100}%`;
+      button.style.top = `${Number(court.layout_y) * 100}%`;
+      button.style.width = `${Number(court.layout_width) * 100}%`;
+      button.style.height = `${Number(court.layout_height) * 100}%`;
+      button.textContent = court.name;
+      button.addEventListener('click', () => {
+        selectedCourtId = court.id;
+        draw();
+      });
+
+      map.appendChild(button);
+    });
+
+    const selected = data.courts.find((court) => court.id === selectedCourtId);
+    if (!selected) return;
+
+    const heading = document.createElement('h3');
+    heading.textContent = selected.name;
+    slotsPanel.appendChild(heading);
+
+    selected.slots.forEach((slot) => {
+      const button = document.createElement('button');
+      const price = slot.price_total ? ` · ${slot.currency} ${slot.price_total}` : '';
+
+      button.type = 'button';
+      button.className = 'slot-btn';
+      button.dataset.status = slot.status;
+      button.textContent = `${formatSlotTime(slot.starts_at)}${price}`;
+      button.disabled = slot.status !== 'available';
+      button.addEventListener('click', () => {
+        renderBookingForm(data.company.id, selected, sportId, durationMinutes, slot, bookingPanel, refresh);
+      });
+
+      slotsPanel.appendChild(button);
+    });
+  };
+
+  draw();
+}
+
+function renderBookingForm(
+  companyId: number,
+  court: AvailabilityCourt,
+  sportId: number,
+  durationMinutes: number,
+  slot: AvailabilitySlot,
+  panel: HTMLElement,
+  refresh: () => Promise<void>
+): void {
+  panel.innerHTML = '';
+
+  const form = document.createElement('form');
+  form.className = 'booking-form';
+
+  const title = document.createElement('h3');
+  title.textContent = `${court.name} · ${formatSlotTime(slot.starts_at)}`;
+  form.appendChild(title);
+
+  const nameInput = document.createElement('input');
+  const emailInput = document.createElement('input');
+  const phoneInput = document.createElement('input');
+
+  nameInput.required = true;
+  emailInput.type = 'email';
+
+  appendAvailabilityControl(form, structure.commonText.customerName, nameInput);
+  appendAvailabilityControl(form, structure.commonText.customerEmail, emailInput, false);
+  appendAvailabilityControl(form, structure.commonText.customerPhone, phoneInput, false);
+
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.textContent = getLocalizedText(structure.commonText.reserve);
+  form.appendChild(submitBtn);
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    try {
+      const response = await apiFetch('/bookings/hold', {
+        method: 'POST',
+        body: JSON.stringify({
+          company_id: companyId,
+          court_id: court.id,
+          sport_id: sportId,
+          starts_at: slot.starts_at,
+          duration_minutes: durationMinutes,
+          customer_name: nameInput.value,
+          customer_email: emailInput.value,
+          customer_phone: phoneInput.value,
+        }),
+      });
+
+      if (!response.ok) {
+        return showErrorMessage(await errorMessage(response));
+      }
+
+      const data = (await response.json()) as { booking: { id: number } };
+      setMessage(getLocalizedText(structure.commonText.bookingHeld));
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = getLocalizedText(structure.commonText.confirm);
+      confirmBtn.addEventListener('click', async () => {
+        const confirmResponse = await apiFetch(`/bookings/${data.booking.id}/confirm`, {
+          method: 'POST',
+        });
+
+        if (!confirmResponse.ok) {
+          return showErrorMessage(await errorMessage(confirmResponse));
+        }
+
+        setMessage(getLocalizedText(structure.commonText.bookingConfirmed));
+        await refresh();
+      });
+
+      panel.innerHTML = '';
+      panel.appendChild(confirmBtn);
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message !== 'Authentication required' && message !== 'Forbidden') {
+        setMessage(getLocalizedText(structure.commonText.errorSaving));
+        console.error('Error holding booking:', error);
+      }
+    }
+  });
+
+  panel.appendChild(form);
 }
 
 // -----------------------------------------------------------------------------
@@ -1596,7 +2018,7 @@ async function showAnyForm<K extends TableKey>(
   tableKey: K,
   record?: Partial<TableRecordMap[K]>
 ): Promise<void> {
-  if (!canWriteAcademic()) {
+  if (!canWriteBusiness()) {
     setMessage(getLocalizedText(structure.commonText.noEditPermission));
     return;
   }
@@ -1636,14 +2058,6 @@ async function showAnyForm<K extends TableKey>(
 
   fields.forEach((field) => form.appendChild(field));
 
-  if (tableKey === 'students' && !isEdit) {
-    appendPasswordField(
-      form,
-      'students-password',
-      getLocalizedText(structure.commonText.initialPassword)
-    );
-  }
-
   const actionsDiv = document.createElement('div');
   actionsDiv.className = 'form-actions';
 
@@ -1675,10 +2089,6 @@ async function showAnyForm<K extends TableKey>(
 
     const payload = collectFormData(tableKey) as Record<string, unknown>;
 
-    if (tableKey === 'students' && !isEdit) {
-      payload.password = (document.getElementById('students-password') as HTMLInputElement).value;
-    }
-
     const pkAndTheirValues = getPkFields(tableKey).map((pkFieldName) => {
       const value =
         payload[pkFieldName] ??
@@ -1689,9 +2099,13 @@ async function showAnyForm<K extends TableKey>(
     });
 
     const queryParams = new URLSearchParams(pkAndTheirValues).toString();
+    const savePath =
+      tableKey === 'courts' && !isEdit
+        ? `/companies/${encodeURIComponent(String(payload.company_id ?? ''))}/courts`
+        : `/${tableKey}?${queryParams}`;
 
     try {
-      const response = await apiFetch(`/${tableKey}?${queryParams}`, {
+      const response = await apiFetch(savePath, {
         method: isEdit ? 'PUT' : 'POST',
         body: JSON.stringify(payload),
       });
@@ -1708,11 +2122,7 @@ async function showAnyForm<K extends TableKey>(
 
       hideAnyForm();
 
-      if (tableKey === 'students' && !isEdit && payload.password) {
-        setMessage(getLocalizedText(structure.commonText.studentAndUserCreated));
-      } else {
-        showSuccessMessage(responseJson.message ?? '');
-      }
+      showSuccessMessage(responseJson.message ?? '');
 
       loadTableData(tableKey);
     } catch (error) {

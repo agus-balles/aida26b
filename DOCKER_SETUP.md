@@ -7,7 +7,7 @@
 To build and run with separate containers for backend and frontend:
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 This configuration is ideal for development as it allows independent service management and easier debugging.
@@ -24,7 +24,7 @@ This configuration is ideal for development as it allows independent service man
 To build and run with both backend and frontend in a single container (canonical):
 
 ```bash
-docker-compose -f docker-compose.combined.yml up --build
+docker compose -f docker-compose.combined.yml up --build
 ```
 
 This configuration combines both services into one container with the frontend served as static files by the backend.
@@ -32,6 +32,42 @@ This configuration combines both services into one container with the frontend s
 **Access the application:**
 - Application: http://localhost:3000 (both frontend and API)
 - Database: localhost:5432
+
+---
+
+### Option 3: Plain Docker
+
+The root `Dockerfile` builds the combined app image, so plain Docker works too.
+Run Postgres on the same Docker network, then run the app with the same database
+environment:
+
+```bash
+docker network create aida26_network
+
+docker run -d --name aida26_database --network aida26_network \
+  -e POSTGRES_USER=aida26_user \
+  -e POSTGRES_PASSWORD=CambiaEsta! \
+  -e POSTGRES_DB=faculty_management \
+  -v aida26_postgres_data:/var/lib/postgresql \
+  -p 5432:5432 \
+  postgres:18-alpine
+
+docker build -t aida26-app .
+
+docker run --rm --name aida26_app --network aida26_network \
+  -e DB_HOST=aida26_database \
+  -e DB_PORT=5432 \
+  -e DB_NAME=faculty_management \
+  -e DB_USER=aida26_user \
+  -e DB_PASSWORD=CambiaEsta! \
+  -e ADMIN_USERNAME=admin \
+  -e ADMIN_PASSWORD=yourpassword \
+  -e ADMIN_EMAIL=admin@example.com \
+  -p 3000:3000 \
+  aida26-app
+```
+
+Access the application at http://localhost:3000.
 
 ---
 
@@ -53,61 +89,61 @@ This configuration combines both services into one container with the frontend s
 
 Start services in the background:
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ### Combined services
 
 Start services in the background:
 ```bash
-docker-compose -f docker-compose.combined.yml up -d --build
+docker compose -f docker-compose.combined.yml up -d --build
 ```
 
 ### Both configurations
 
 Stop all services:
 ```bash
-docker-compose down                              # Separated
-docker-compose -f docker-compose.combined.yml down  # Combined
+docker compose down                                  # Separated
+docker compose -f docker-compose.combined.yml down   # Combined
 ```
 
 Stop services and remove volumes (clean database):
 ```bash
-docker-compose down -v                              # Separated
-docker-compose -f docker-compose.combined.yml down -v  # Combined
+docker compose down -v                                  # Separated
+docker compose -f docker-compose.combined.yml down -v   # Combined
 ```
 
 View logs:
 ```bash
-docker-compose logs -f                          # All services (separated)
-docker-compose -f docker-compose.combined.yml logs -f  # Combined
-docker-compose logs -f backend                  # Backend only (separated)
-docker-compose -f docker-compose.combined.yml logs -f app  # App service (combined)
+docker compose logs -f                                # All services (separated)
+docker compose -f docker-compose.combined.yml logs -f # Combined
+docker compose logs -f backend                        # Backend only (separated)
+docker compose -f docker-compose.combined.yml logs -f app # App service (combined)
 ```
 
 Restart a specific service:
 ```bash
-docker-compose restart backend                  # Separated
-docker-compose -f docker-compose.combined.yml restart app  # Combined
+docker compose restart backend                         # Separated
+docker compose -f docker-compose.combined.yml restart app # Combined
 ```
 
 Rebuild a specific service:
 ```bash
-docker-compose up -d --build backend            # Separated
-docker-compose -f docker-compose.combined.yml up -d --build app  # Combined
+docker compose up -d --build backend                         # Separated
+docker compose -f docker-compose.combined.yml up -d --build app # Combined
 ```
 
 Access the database directly:
 ```bash
-docker-compose exec database psql -U postgres -d faculty_management
-docker-compose -f docker-compose.combined.yml exec database psql -U postgres -d faculty_management
+docker compose exec database psql -U aida26_user -d faculty_management
+docker compose -f docker-compose.combined.yml exec database psql -U aida26_user -d faculty_management
 ```
 
 ## Services Architecture
 
 ### Separated Configuration (docker-compose.yml)
 
-- **database**: PostgreSQL 15 Alpine
+- **database**: PostgreSQL 18 Alpine
   - Container: aida26_database
   - Port: 5432
   - Persistent data in `postgres_data` volume
@@ -129,7 +165,7 @@ docker-compose -f docker-compose.combined.yml exec database psql -U postgres -d 
 
 ### Combined Configuration (docker-compose.combined.yml)
 
-- **database**: PostgreSQL 15 Alpine
+- **database**: PostgreSQL 18 Alpine
   - Container: aida26_database
   - Port: 5432
   - Persistent data in `postgres_data` volume
@@ -139,7 +175,7 @@ docker-compose -f docker-compose.combined.yml exec database psql -U postgres -d 
   - Container: aida26_app
   - Port: 3000
   - Language: TypeScript (with tsx)
-  - Frontend files served as static content from `/public`
+  - Frontend files served as static content from `/app/frontend/dist`
   - Backend API available at `/api/*`
   - Depends on database service
   - Single container simplifies deployment and resource management
@@ -181,28 +217,28 @@ cp .env.example .env
 ## Troubleshooting
 
 ### Database connection refused
-- Ensure database service is healthy: `docker-compose ps` (separated) or `docker-compose -f docker-compose.combined.yml ps` (combined)
-- Check database logs: `docker-compose logs database`
+- Ensure database service is healthy: `docker compose ps` (separated) or `docker compose -f docker-compose.combined.yml ps` (combined)
+- Check database logs: `docker compose logs database`
 - Wait for health check to pass (usually 30-60 seconds)
 
 ### Backend cannot connect to database
 - Verify services are on the same network: `docker network ls`
-- Check backend logs: `docker-compose logs backend` (separated) or `docker-compose -f docker-compose.combined.yml logs app` (combined)
+- Check backend logs: `docker compose logs backend` (separated) or `docker compose -f docker-compose.combined.yml logs app` (combined)
 - Ensure DB_HOST is set to `database` (the service name)
 
 ### Frontend cannot reach backend (Separated configuration only)
-- Check if both services are running: `docker-compose ps`
+- Check if both services are running: `docker compose ps`
 - Verify API_URL is correct in frontend (should be http://backend:3000)
-- Check frontend logs: `docker-compose logs frontend`
+- Check frontend logs: `docker compose logs frontend`
 
 ### Port already in use
-- Stop existing containers: `docker-compose down` or `docker-compose -f docker-compose.combined.yml down`
+- Stop existing containers: `docker compose down` or `docker compose -f docker-compose.combined.yml down`
 - Or change ports in the respective compose file
 
 ### Services won't start (Combined configuration)
 - The combined build can take longer due to building both frontend and backend
-- Check build logs: `docker-compose -f docker-compose.combined.yml up --build` (without -d flag)
-- Ensure `Dockerfile.combined` exists in project root
+- Check build logs: `docker compose -f docker-compose.combined.yml up --build` (without -d flag)
+- Ensure `Dockerfile` exists in project root
 
 ## Development
 
@@ -214,8 +250,8 @@ For active development with separated services, volumes enable hot-reload:
 
 To rebuild after code changes:
 ```bash
-docker-compose up -d --build backend  # Rebuild backend
-docker-compose up -d --build frontend # Rebuild frontend
+docker compose up -d --build backend  # Rebuild backend
+docker compose up -d --build frontend # Rebuild frontend
 ```
 
 ### Combined Configuration
@@ -226,7 +262,7 @@ For the combined configuration:
 
 To rebuild after code changes:
 ```bash
-docker-compose -f docker-compose.combined.yml up -d --build app
+docker compose -f docker-compose.combined.yml up -d --build app
 ```
 
 **Note**: The combined configuration is better for production than development since frontend changes require a full rebuild.
@@ -252,7 +288,7 @@ docker-compose -f docker-compose.combined.yml up -d --build app
 For both configurations, you would typically:
 
 1. Build images once and push to registry
-2. Use environment-specific compose files (e.g., docker-compose.prod.yml)
+2. Use environment-specific Compose files (e.g., compose.prod.yml)
 3. Set `NODE_ENV=production`
 4. Use Alpine images for smaller size (already configured)
 5. Add reverse proxy (nginx) for SSL/TLS
@@ -262,4 +298,4 @@ For both configurations, you would typically:
 9. Use health checks and restart policies
 10. Implement logging aggregation
 
-Example production docker-compose can be created upon request.
+Example production Compose files can be created upon request.
