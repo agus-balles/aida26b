@@ -13,6 +13,44 @@ function localizeText(text: LocalizedText): string {
   return text[getCurrentLanguage()] ?? text.es;
 }
 
+const courtFormatOptions: Array<{ value: string; label: LocalizedText }> = [
+  { value: 'soccer_11', label: { es: 'Fútbol 11', en: 'Soccer 11' } },
+  { value: 'soccer_9', label: { es: 'Fútbol 9', en: 'Soccer 9' } },
+  { value: 'soccer_8', label: { es: 'Fútbol 8', en: 'Soccer 8' } },
+  { value: 'soccer_7', label: { es: 'Fútbol 7', en: 'Soccer 7' } },
+  { value: 'soccer_6', label: { es: 'Fútbol 6', en: 'Soccer 6' } },
+  { value: 'soccer_5', label: { es: 'Fútbol 5', en: 'Soccer 5' } },
+  { value: 'padel', label: { es: 'Pádel', en: 'Padel' } },
+  { value: 'tennis', label: { es: 'Tenis', en: 'Tennis' } },
+  { value: 'basketball', label: { es: 'Básquet', en: 'Basketball' } },
+  { value: 'basketball_half', label: { es: 'Media cancha de básquet', en: 'Half basketball court' } },
+  { value: 'volleyball', label: { es: 'Vóley', en: 'Volleyball' } },
+  { value: 'volleyball_training', label: { es: 'Zona de entrenamiento de vóley', en: 'Volleyball training area' } },
+];
+
+const partitionLayoutOptions: Array<{ value: string; label: LocalizedText }> = [
+  {
+    value: '[{"x":0,"y":0,"width":1,"height":1}]',
+    label: { es: 'Conversión de cancha completa', en: 'Full-court conversion' },
+  },
+  {
+    value: '[{"x":0,"y":0,"width":0.5,"height":1},{"x":0.5,"y":0,"width":0.5,"height":1}]',
+    label: { es: '2 canchas lado a lado', en: '2 side-by-side courts' },
+  },
+  {
+    value: '[{"x":0,"y":0,"width":0.333333,"height":1},{"x":0.333333,"y":0,"width":0.333334,"height":1},{"x":0.666667,"y":0,"width":0.333333,"height":1}]',
+    label: { es: '3 canchas lado a lado', en: '3 side-by-side courts' },
+  },
+  {
+    value: '[{"x":0,"y":0,"width":0.5,"height":0.5},{"x":0.5,"y":0,"width":0.5,"height":0.5},{"x":0,"y":0.5,"width":0.5,"height":0.5},{"x":0.5,"y":0.5,"width":0.5,"height":0.5}]',
+    label: { es: '4 canchas en grilla 2x2', en: '4 courts in a 2x2 grid' },
+  },
+  {
+    value: '[{"x":0,"y":0,"width":0.333333,"height":0.5},{"x":0.333333,"y":0,"width":0.333334,"height":0.5},{"x":0.666667,"y":0,"width":0.333333,"height":0.5},{"x":0,"y":0.5,"width":0.333333,"height":0.5},{"x":0.333333,"y":0.5,"width":0.333334,"height":0.5},{"x":0.666667,"y":0.5,"width":0.333333,"height":0.5}]',
+    label: { es: '6 canchas en grilla 3x2', en: '6 courts in a 3x2 grid' },
+  },
+];
+
 export const structure = {
   tables: {
     companies: {
@@ -70,6 +108,7 @@ export const structure = {
         timezone: {
           type: 'string',
           label: { es: 'Zona horaria', en: 'Timezone' },
+          defaultValue: 'America/Argentina/Buenos_Aires',
           validator: {
             required: true,
           },
@@ -211,20 +250,6 @@ export const structure = {
           },
         },
 
-        format: {
-          type: 'string',
-          label: { es: 'Formato', en: 'Format' },
-          input: 'select',
-          validator: {
-            required: true,
-          },
-          options: [
-            { value: 'soccer_11', label: { es: 'Fútbol 11', en: 'Soccer 11' } },
-            { value: 'soccer_8', label: { es: 'Fútbol 8', en: 'Soccer 8' } },
-            { value: 'soccer_5', label: { es: 'Fútbol 5', en: 'Soccer 5' } },
-          ],
-        },
-
         sport_id: {
           type: 'number',
           label: { es: 'Deporte', en: 'Sport' },
@@ -241,10 +266,34 @@ export const structure = {
           },
         },
 
+        format: {
+          type: 'string',
+          label: { es: 'Formato', en: 'Format' },
+          input: 'select',
+          validator: {
+            required: true,
+          },
+          options: [
+            { value: 'soccer_11', label: { es: 'Fútbol 11', en: 'Soccer 11' } },
+            { value: 'soccer_9', label: { es: 'Fútbol 9', en: 'Soccer 9' } },
+            { value: 'soccer_8', label: { es: 'Fútbol 8', en: 'Soccer 8' } },
+            { value: 'soccer_7', label: { es: 'Fútbol 7', en: 'Soccer 7' } },
+            { value: 'soccer_6', label: { es: 'Fútbol 6', en: 'Soccer 6' } },
+            { value: 'soccer_5', label: { es: 'Fútbol 5', en: 'Soccer 5' } },
+            { value: 'padel', label: { es: 'Pádel', en: 'Padel' } },
+            { value: 'tennis', label: { es: 'Tenis', en: 'Tennis' } },
+            { value: 'basketball', label: { es: 'Básquet', en: 'Basketball' } },
+            { value: 'basketball_half', label: { es: 'Media cancha de básquet', en: 'Half basketball court' } },
+            { value: 'volleyball', label: { es: 'Vóley', en: 'Volleyball' } },
+            { value: 'volleyball_training', label: { es: 'Zona de entrenamiento de vóley', en: 'Volleyball training area' } },
+          ],
+        },
+
         is_partitionable: {
           type: 'string',
           label: { es: 'Particionable', en: 'Partitionable' },
           input: 'select',
+          defaultValue: 'false',
           validator: {
             required: true,
           },
@@ -307,6 +356,8 @@ export const structure = {
         source_format: {
           type: 'string',
           label: { es: 'Formato Origen', en: 'Source Format' },
+          input: 'select',
+          options: courtFormatOptions,
           validator: {
             required: true,
           },
@@ -315,6 +366,32 @@ export const structure = {
         target_format: {
           type: 'string',
           label: { es: 'Formato Destino', en: 'Target Format' },
+          input: 'select',
+          options: courtFormatOptions,
+          validator: {
+            required: true,
+          },
+        },
+
+        target_sport_id: {
+          type: 'number',
+          label: { es: 'Deporte Destino', en: 'Target Sport' },
+          input: 'select',
+          foreignKey: {
+            table: 'sports',
+            valueField: 'id',
+            labelField: 'name',
+          },
+          validator: {
+            nullable: true,
+          },
+        },
+
+        layout_json: {
+          type: 'string',
+          label: { es: 'Distribución', en: 'Layout' },
+          input: 'select',
+          options: partitionLayoutOptions,
           validator: {
             required: true,
           },
@@ -331,19 +408,11 @@ export const structure = {
           },
         },
 
-        layout_json: {
-          type: 'string',
-          label: { es: 'Layout JSON', en: 'Layout JSON' },
-          input: 'textarea',
-          validator: {
-            required: true,
-          },
-        },
-
         usable_area_ratio: {
           type: 'number',
           label: { es: 'Área útil', en: 'Usable Area' },
           input: 'number',
+          defaultValue: 1,
           validator: {
             required: true,
             minValue: 0.01,
@@ -355,6 +424,7 @@ export const structure = {
           type: 'number',
           label: { es: 'Prioridad', en: 'Priority' },
           input: 'number',
+          defaultValue: 0,
           validator: {
             required: true,
             integer: true,
@@ -426,6 +496,7 @@ export const structure = {
         currency: {
           type: 'string',
           label: { es: 'Moneda', en: 'Currency' },
+          defaultValue: 'ARS',
           validator: {
             required: true,
             pattern: '^[A-Z]{3}$',
@@ -491,6 +562,7 @@ export const structure = {
           type: 'number',
           label: { es: 'Duración (min)', en: 'Duration (min)' },
           input: 'number',
+          defaultValue: 60,
           validator: {
             required: true,
             integer: true,
@@ -579,8 +651,6 @@ export const structure = {
     currentPassword: { es: 'Contraseña actual', en: 'Current Password' },
     newPassword: { es: 'Nueva contraseña', en: 'New Password' },
     logout: { es: 'Salir', en: 'Logout' },
-    addProfessor: { es: 'Agregar Profesor', en: 'Add Professor' },
-    addAdmin: { es: 'Agregar Admin', en: 'Add Admin' },
     added: { es: 'agregado', en: 'added' },
     availability: { es: 'Reservas', en: 'Bookings' },
     company: { es: 'Empresa', en: 'Company' },
@@ -612,19 +682,9 @@ export const structure = {
     errorDeleting: { es: 'Error eliminando', en: 'Error deleting' },
     errorLoadingRecord: { es: 'Error cargando registro', en: 'Error loading record' },
 
-    // User management
-    onlyAdminCanCreateUsers: { es: 'Solo admin puede crear usuarios', en: 'Only admin can create users' },
-    errorCreatingUser: { es: 'Error creando usuario', en: 'Error creating user' },
     noEditPermission: { es: 'No tenés permiso para editar', en: 'You do not have edit permission' },
-    userAdded: { es: 'Usuario agregado', en: 'User added' },
-
-    // Form labels
-    initialPassword: { es: 'Contraseña inicial', en: 'Initial Password' },
     usernameLabel: { es: 'Usuario', en: 'Username' },
     emailLabel: { es: 'Email', en: 'Email' },
-    professorRole: { es: 'Profesor', en: 'Professor' },
-    adminRole: { es: 'Admin', en: 'Admin' },
-    addUser: { es: 'Agregar usuario', en: 'Add user' },
 
     // Filters / pagination
     addFilter: { es: 'Agregar Filtro', en: 'Add Filter' },

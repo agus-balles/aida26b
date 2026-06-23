@@ -34,6 +34,7 @@ type PartitionRuleRow = {
   id: number;
   source_format: string;
   target_format: string;
+  target_sport_id: number | null;
   child_count: number;
   layout_json: unknown;
 };
@@ -48,6 +49,14 @@ type SlotLock = {
 type HttpErrorBody = {
   error: string;
   alternatives?: number[];
+};
+
+const formatsBySportSlug: Record<string, string[]> = {
+  soccer: ['soccer_11', 'soccer_9', 'soccer_8', 'soccer_7', 'soccer_6', 'soccer_5'],
+  padel: ['padel'],
+  tennis: ['tennis'],
+  basketball: ['basketball', 'basketball_half'],
+  volleyball: ['volleyball', 'volleyball_training'],
 };
 
 class HttpError extends Error {
@@ -74,6 +83,20 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+async function validateCourtFormat(client: PoolClient, sportId: number, format: string): Promise<void> {
+  const result = await client.query<{ slug: string }>(
+    'SELECT slug FROM sports WHERE id = $1',
+    [sportId]
+  );
+  const allowedFormats = formatsBySportSlug[result.rows[0]?.slug];
+
+  if (!allowedFormats || !allowedFormats.includes(format)) {
+    throw new HttpError(400, {
+      error: 'El formato elegido no corresponde al deporte seleccionado.',
+    });
+  }
+}
+
 function booleanValue(value: unknown): boolean {
   return value === true || value === 'true' || value === 1 || value === '1';
 }
@@ -81,15 +104,20 @@ function booleanValue(value: unknown): boolean {
 function readPositiveInteger(value: unknown, field: string): number {
   const parsed = numberValue(value);
   if (parsed === null || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new HttpError(400, { error: `${field} must be a positive integer` });
+    throw new HttpError(400, { error: `El valor de ${field} debe ser un entero positivo.` });
   }
   return parsed;
+}
+
+function readOptionalPositiveInteger(value: unknown, field: string): number | null {
+  if (value == null || value === '') return null;
+  return readPositiveInteger(value, field);
 }
 
 function readDate(value: unknown, field: string): Date {
   const date = new Date(String(value ?? ''));
   if (Number.isNaN(date.getTime())) {
-    throw new HttpError(400, { error: `${field} must be a valid date` });
+    throw new HttpError(400, { error: `Ingresá una fecha válida para ${field}.` });
   }
   return date;
 }
@@ -125,7 +153,7 @@ export function normalizeLayout(value: unknown, childCount: number): LayoutRect[
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
 
   if (!Array.isArray(parsed) || parsed.length !== childCount) {
-    throw new HttpError(400, { error: 'Partition layout does not match child_count' });
+    throw new HttpError(400, { error: 'La regla de partición no coincide con la cantidad de subcanchas.' });
   }
 
   const rects = parsed.map((item) => {
@@ -149,7 +177,7 @@ export function normalizeLayout(value: unknown, childCount: number): LayoutRect[
       rect.x + rect.width > 1.000001 ||
       rect.y + rect.height > 1.000001
     ) {
-      throw new HttpError(400, { error: 'Partition layout has invalid rectangles' });
+      throw new HttpError(400, { error: 'La regla de partición tiene áreas inválidas.' });
     }
 
     return rect as LayoutRect;
@@ -158,7 +186,7 @@ export function normalizeLayout(value: unknown, childCount: number): LayoutRect[
   for (let i = 0; i < rects.length; i++) {
     for (let j = i + 1; j < rects.length; j++) {
       if (rectsOverlap(rects[i], rects[j])) {
-        throw new HttpError(400, { error: 'Partition layout rectangles overlap' });
+        throw new HttpError(400, { error: 'Las áreas de la regla de partición se superponen.' });
       }
     }
   }
@@ -286,7 +314,7 @@ async function requireCompanyAccess(
   write: boolean
 ) {
   if (!(await hasCompanyAccess(queryable, (req as AuthedRequest).user, companyId, write))) {
-    throw new HttpError(403, { error: 'Forbidden' });
+    throw new HttpError(403, { error: 'No tenés permisos para realizar esta acción.' });
   }
 }
 
@@ -332,6 +360,47 @@ async function fetchBestRule(queryable: Queryable, sourceFormat: string): Promis
   return result.rows[0] ?? null;
 }
 
+async function selectRootRule(
+  queryable: Queryable,
+  sourceFormat: string,
+  requestedRuleId: number | null
+): Promise<PartitionRuleRow> {
+  const result = await queryable.query<PartitionRuleRow>(
+    `SELECT *
+     FROM court_partition_rules
+     WHERE source_format = $1
+       AND is_active = true
+     ORDER BY priority DESC, usable_area_ratio DESC, child_count DESC, id ASC`,
+    [sourceFormat]
+  );
+
+  if (result.rowCount === 0) {
+    throw new HttpError(400, {
+      error: `No hay una regla de partición activa para ${sourceFormat}.`,
+    });
+  }
+
+  if (requestedRuleId !== null) {
+    const selected = result.rows.find((rule) => Number(rule.id) === requestedRuleId);
+
+    if (!selected) {
+      throw new HttpError(400, {
+        error: 'La regla de partición elegida no corresponde al formato de la cancha.',
+      });
+    }
+
+    return selected;
+  }
+
+  if ((result.rowCount ?? 0) > 1) {
+    throw new HttpError(400, {
+      error: 'Elegí una regla de partición para continuar.',
+    });
+  }
+
+  return result.rows[0];
+}
+
 async function hasChildRule(queryable: Queryable, sourceFormat: string): Promise<boolean> {
   const result = await queryable.query<{ exists: boolean }>(
     `SELECT EXISTS (
@@ -350,13 +419,14 @@ async function createChildCourts(
   client: PoolClient,
   parent: CourtRow,
   rootCourtId: number,
-  required: boolean
+  required: boolean,
+  selectedRule?: PartitionRuleRow
 ) {
-  const rule = await fetchBestRule(client, parent.format);
+  const rule = selectedRule ?? await fetchBestRule(client, parent.format);
 
   if (!rule) {
     if (required) {
-      throw new HttpError(400, { error: `No active partition rule for ${parent.format}` });
+      throw new HttpError(400, { error: `No hay una regla de partición activa para ${parent.format}.` });
     }
     return;
   }
@@ -367,6 +437,24 @@ async function createChildCourts(
   const parentWidth = toNumber(parent.layout_width);
   const parentHeight = toNumber(parent.layout_height);
   const childIsPartitionable = await hasChildRule(client, rule.target_format);
+  const childSportId = rule.target_sport_id == null
+    ? parent.sport_id
+    : Number(rule.target_sport_id);
+
+  if (childSportId !== parent.sport_id) {
+    const companySport = await client.query(
+      `SELECT 1
+       FROM company_sports
+       WHERE company_id = $1 AND sport_id = $2`,
+      [parent.company_id, childSportId]
+    );
+
+    if (companySport.rowCount === 0) {
+      throw new HttpError(400, {
+        error: 'La empresa debe ofrecer el deporte destino de la regla de partición.',
+      });
+    }
+  }
 
   for (let index = 0; index < layout.length; index++) {
     const rect = layout[index];
@@ -380,9 +468,9 @@ async function createChildCourts(
         parent.company_id,
         parent.id,
         rootCourtId,
-        `${parent.name} ${rule.target_format.replace('soccer_', '')}.${index + 1}`,
+        `${parent.name} ${rule.target_format.replace('soccer_', '').replace(/_/g, ' ')}.${index + 1}`,
         rule.target_format,
-        parent.sport_id,
+        childSportId,
         childIsPartitionable,
         parentX + rect.x * parentWidth,
         parentY + rect.y * parentHeight,
@@ -407,12 +495,35 @@ export function createCourtWithPartitions(pool: Pool) {
       const format = stringValue(req.body.format);
       const sportId = readPositiveInteger(req.body.sport_id, 'sport_id');
       const isPartitionable = booleanValue(req.body.is_partitionable);
+      const partitionRuleId = readOptionalPositiveInteger(
+        req.body.partition_rule_id,
+        'partition_rule_id'
+      );
 
       if (!name || !format) {
-        throw new HttpError(400, { error: 'name and format are required' });
+        throw new HttpError(400, { error: 'Completá el nombre y el formato de la cancha.' });
       }
 
       await client.query('BEGIN');
+
+      const companySport = await client.query(
+        `SELECT 1
+         FROM company_sports
+         WHERE company_id = $1 AND sport_id = $2`,
+        [companyId, sportId]
+      );
+
+      if (companySport.rowCount === 0) {
+        throw new HttpError(400, {
+          error: 'Primero asociá este deporte a la empresa antes de crear una cancha.',
+        });
+      }
+
+      await validateCourtFormat(client, sportId, format);
+
+      const rootRule = isPartitionable
+        ? await selectRootRule(client, format, partitionRuleId)
+        : null;
 
       const root = await client.query<CourtRow>(
         `INSERT INTO courts
@@ -434,7 +545,8 @@ export function createCourtWithPartitions(pool: Pool) {
           client,
           { ...rootCourt, root_court_id: rootCourt.id },
           rootCourt.id,
-          true
+          true,
+          rootRule ?? undefined
         );
       }
 
@@ -457,7 +569,7 @@ export function createCourtWithPartitions(pool: Pool) {
 
 function dateWindow(date: string): { start: Date; end: Date } {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw new HttpError(400, { error: 'date must be YYYY-MM-DD' });
+    throw new HttpError(400, { error: 'Elegí una fecha válida.' });
   }
 
   const start = new Date(`${date}T00:00:00.000Z`);
@@ -488,7 +600,7 @@ async function validateTimeBlock(queryable: Queryable, companyId: number, durati
   );
 
   if (result.rowCount === 0) {
-    throw new HttpError(400, { error: 'Time block is not available for this company' });
+    throw new HttpError(400, { error: 'La duración elegida no está configurada para esta empresa.' });
   }
 }
 
@@ -611,19 +723,19 @@ export function getCompanyAvailability(pool: Pool) {
       );
 
       if (company.rowCount === 0) {
-        throw new HttpError(404, { error: 'Company not found' });
+        throw new HttpError(404, { error: 'La empresa seleccionada no está disponible.' });
       }
 
       const courtResult = await pool.query<CourtRow>(
         `SELECT *
          FROM courts
          WHERE company_id = $1
-           AND sport_id = $2
            AND is_active = true
          ORDER BY COALESCE(root_court_id, id), parent_court_id NULLS FIRST, id`,
-        [companyId, sportId]
+        [companyId]
       );
-      const courts = courtResult.rows.map(normalizeCourtRow);
+      const allCourts = courtResult.rows.map(normalizeCourtRow);
+      const courts = allCourts.filter((court) => court.sport_id === sportId);
       const prices = await fetchPrices(pool, courts.map((court) => court.id), sportId);
       const locks = await fetchDayLocks(pool, companyId, dayStart, dayEnd);
       const slots = buildSlots(date, durationMinutes);
@@ -641,13 +753,13 @@ export function getCompanyAvailability(pool: Pool) {
           layout_width: court.layout_width,
           layout_height: court.layout_height,
           slots: slots.map((slot) => {
-            const atomicIds = getAtomicCourtIds(courts, court.id);
+            const atomicIds = getAtomicCourtIds(allCourts, court.id);
             const status = statusForSlot(locks, atomicIds, slot.startsAt, slot.endsAt);
             const lockedIds = lockedCourtIdsForSlot(locks, slot.startsAt, slot.endsAt);
             const alternatives = status === 'available'
-              ? findCompactionAlternatives(courts, lockedIds, court.id)
+              ? findCompactionAlternatives(allCourts, lockedIds, court.id)
               : [];
-            const price = priceForCourt(court, courts, prices, durationMinutes);
+            const price = priceForCourt(court, allCourts, prices, durationMinutes);
 
             return {
               starts_at: slot.startsAt.toISOString(),
@@ -682,7 +794,7 @@ async function fetchSelectedCourt(
   );
 
   if (result.rowCount === 0) {
-    throw new HttpError(404, { error: 'Court not found' });
+    throw new HttpError(404, { error: 'La cancha seleccionada no está disponible.' });
   }
 
   return normalizeCourtRow(result.rows[0]);
@@ -726,7 +838,7 @@ export function holdBooking(pool: Pool) {
       const customerPhone = stringValue(req.body.customer_phone) || null;
 
       if (!customerName) {
-        throw new HttpError(400, { error: 'customer_name is required' });
+        throw new HttpError(400, { error: 'Completá el nombre de la persona que reserva.' });
       }
 
       await client.query('BEGIN');
@@ -746,7 +858,7 @@ export function holdBooking(pool: Pool) {
       const overlapping = await fetchLockedIdsForCourts(client, affectedCourtIds, startsAt, endsAt);
 
       if (overlapping.length > 0) {
-        throw new HttpError(409, { error: 'Selected slot is not available' });
+        throw new HttpError(409, { error: 'Ese horario acaba de dejar de estar disponible. Elegí otro.' });
       }
 
       const allRootAtomicIds = courts.flatMap((candidate) => getAtomicCourtIds(courts, candidate.id));
@@ -755,7 +867,7 @@ export function holdBooking(pool: Pool) {
 
       if (alternatives.length > 0) {
         throw new HttpError(409, {
-          error: 'Selected court would fragment available space',
+          error: 'Elegí una de las canchas sugeridas para aprovechar mejor el espacio disponible.',
           alternatives,
         });
       }
@@ -826,14 +938,14 @@ export function confirmBooking(pool: Pool) {
       );
 
       if (current.rowCount === 0) {
-        throw new HttpError(404, { error: 'Booking not found' });
+        throw new HttpError(404, { error: 'La reserva no está disponible.' });
       }
 
       const booking = current.rows[0];
       await requireCompanyAccess(client, req, Number(booking.company_id), false);
 
       if (booking.status !== 'held') {
-        throw new HttpError(409, { error: 'Booking is not held' });
+        throw new HttpError(409, { error: 'La reserva ya no está pendiente de confirmación.' });
       }
 
       const updated = await client.query(
@@ -875,7 +987,7 @@ export function cancelBooking(pool: Pool) {
       );
 
       if (current.rowCount === 0) {
-        throw new HttpError(404, { error: 'Booking not found' });
+        throw new HttpError(404, { error: 'La reserva no está disponible.' });
       }
 
       const booking = current.rows[0];
@@ -909,9 +1021,9 @@ function sendReservationError(res: Response, error: unknown, fallback: string) {
   }
 
   if (error instanceof SyntaxError) {
-    return res.status(400).json({ error: 'Invalid JSON layout' });
+    return res.status(400).json({ error: 'La regla de partición debe tener un JSON válido.' });
   }
 
   console.error(fallback, error);
-  return res.status(500).json({ error: 'Internal server error' });
+  return res.status(500).json({ error: 'No se pudo completar la operación. Intentá nuevamente.' });
 }

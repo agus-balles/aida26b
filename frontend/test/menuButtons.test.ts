@@ -17,9 +17,6 @@ describe('Menu Pickers (Theme & Language)', () => {
       <div id="table-nav"></div>
       <div id="view-title"></div>
       <button id="add-record-btn"></button>
-      <div id="admin-actions"></div>
-      <button id="add-teacher-btn"></button>
-      <button id="add-admin-btn"></button>
       <div id="record-form"></div>
       <table id="records-table">
         <thead></thead>

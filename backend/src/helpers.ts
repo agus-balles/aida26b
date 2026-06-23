@@ -10,11 +10,18 @@ async function tryQuery(pool: Pool, queryStatement: string, queryArguments?: any
   try {
     return {success: true , data: await pool.query(queryStatement, queryArguments), message: ''};
   } catch (error) {
-    console.error(error);
     const code = typeof (error as { code?: unknown }).code === 'string'
       ? (error as { code: string }).code
       : undefined;
-    return {success: false, data: error, message: 'Internal server error', code};
+    if (code !== '23505' && code !== '23503') {
+      console.error(error);
+    }
+    return {
+      success: false,
+      data: error,
+      message: 'No se pudo completar la operación. Intentá nuevamente.',
+      code,
+    };
   }
 }
 

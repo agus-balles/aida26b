@@ -51,6 +51,7 @@ type ColumnDef = {
   label?: LocalizedText;
   input?: 'text' | 'email' | 'date' | 'number' | 'textarea' | 'select';
   options?: Array<{ value: string; label: LocalizedText }>;
+  defaultValue?: string | number;
   editable?: boolean;
   required?: boolean;
   readonlyOnEdit?: boolean;

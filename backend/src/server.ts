@@ -462,6 +462,12 @@ app.post(
   requirePasswordReady,
   requireBusinessWrite,
   async (req, res) => {
+    if (req.params.tableName === 'courts') {
+      return res.status(405).json({
+        error: 'Creá las canchas desde el flujo de empresa para aplicar sus reglas de partición.',
+      });
+    }
+
     return postHandler(req, res, pool);
   }
 );

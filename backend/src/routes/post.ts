@@ -64,7 +64,17 @@ export async function postHandler(
       return res.status(409).json({
         success: false,
         data: undefined,
-        message: `${entityName} already exists`,
+        message: tableName === 'company_sports'
+          ? 'Ese deporte ya está asociado a la empresa.'
+          : 'Ya existe un registro con esos datos.',
+      });
+    }
+
+    if (queryResponse.code === '23503') {
+      return res.status(409).json({
+        success: false,
+        data: undefined,
+        message: 'El valor seleccionado ya no está disponible. Actualizá e intentá nuevamente.',
       });
     }
 

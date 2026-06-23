@@ -173,3 +173,105 @@ Verificacion:
 - `docker compose up -d` aplico 1 migracion pendiente.
 - Verificacion en DB: `students`, `subjects` y `enrollments` ya no existen en
   el schema `public`; siguen `companies`, `courts` y `bookings`.
+
+## 2026-06-23 - Remocion de accesos de usuarios antiguos
+
+QUE:
+- Se removieron los controles "Agregar Profesor" y "Agregar Admin" de la UI.
+
+COMO:
+- Se elimino el bloque de acciones del toolbar, sus listeners, textos y estilos.
+- Se elimino el formulario frontend que esos controles abrían.
+- Los endpoints de administracion de usuarios se mantienen sin cambios para una
+  futura pantalla especifica de usuarios.
+
+## 2026-06-23 - Flujo de empresas, deportes y canchas
+
+QUE:
+- Se corrigio el alta de deportes por empresa y se reforzo el flujo completo
+  desde empresa hasta cancha, precio y bloques horarios.
+
+COMO:
+- La validacion compartida ahora compara opciones de selects por su valor
+  normalizado. Asi, un ID numerico enviado por el formulario coincide con la
+  opcion cargada desde la API aunque el navegador la represente como texto.
+- Los formularios muestran mensajes accionables en lugar de errores internos;
+  por ejemplo, una opcion invalida ahora indica que se seleccione una opcion
+  valida y un duplicado de deporte explica que ya esta asociado a la empresa.
+- Se agregaron valores iniciales para zona horaria, moneda, bloque horario,
+  prioridad y area util, evitando formularios incompletos en campos con un
+  valor natural del dominio.
+- Al crear una cancha, la UI limita los deportes a los que la empresa ya ofrece
+  y limita el formato al deporte elegido. El backend vuelve a comprobar ambas
+  reglas dentro de la transaccion.
+- Se agregaron restricciones de base de datos para que una cancha solo pueda
+  usar una combinacion empresa/deporte existente y para que un precio conserve
+  el mismo deporte de su cancha.
+- Se cargaron 5 deportes (futbol, padel, tenis, basquet y voley) y 20 empresas
+  de ejemplo en la base local.
+- Se verifico por API el alta de una cancha de padel, su precio por hora y un
+  bloque de 120 minutos para una empresa que ofrece ese deporte.
+
+Verificacion:
+- Backend TypeScript compila con `npm run build`.
+- Tests backend: 11 tests OK.
+- Tests frontend: 10 tests OK, incluido el caso de IDs numericos en selects.
+- Servicios Docker activos en los puertos 3000 (API), 8080 (frontend) y 5432
+  (PostgreSQL).
+
+## 2026-06-23 - Orden de dependencias al crear canchas
+
+QUE:
+- Se reordeno el formulario de canchas para elegir el deporte antes del
+  formato.
+
+COMO:
+- La SSOT ahora presenta los campos editables como empresa, nombre, deporte,
+  formato y particionado.
+- El formato conserva su dependencia del deporte: antes de elegirlo muestra
+  una indicacion y despues solo ofrece los formatos compatibles.
+- Se agrego una prueba de regresion que confirma que `sport_id` precede a
+  `format` en el formulario.
+
+## 2026-06-23 - Deportes disponibles por empresa
+
+QUE:
+- Se asociaron todos los deportes activos a todas las empresas activas.
+
+COMO:
+- Se inserto la relacion empresa/deporte mediante un producto cartesiano en
+  PostgreSQL con `ON CONFLICT DO NOTHING`, por lo que se preservan las
+  asociaciones existentes y no se generan duplicados.
+- Resultado local: 21 empresas activas, 5 deportes activos y 105 asociaciones.
+
+## 2026-06-23 - Etiquetas en tablas relacionales
+
+QUE:
+- La tabla "Deportes por Empresa" ahora muestra los nombres de empresa y
+  deporte en lugar de sus IDs.
+
+COMO:
+- El renderizador de tablas usa la metadata `foreignKey` existente para cargar
+  las filas referenciadas y construir mapas de ID a etiqueta visible.
+- Los IDs se mantienen sin cambios para filtros, acciones y persistencia; solo
+  se mejora la representacion de las celdas.
+
+## 2026-06-23 - Catalogo y configuracion declarativa de particiones
+
+QUE:
+- Se incorporo un catalogo de 13 reglas activas de particion, incluida la
+  conversion Tenis a Padel.
+- Se reemplazo la edicion manual de `layout_json` por distribuciones nombradas
+  y una vista previa visual.
+
+COMO:
+- Las nuevas migraciones agregan formatos de futbol 6, 7 y 9, media cancha de
+  basquet, zona de entrenamiento de voley y una regla Tenis a Padel con deporte
+  destino explicito.
+- Al crear una cancha particionable, el formulario carga las reglas activas del
+  formato elegido y exige seleccionar una cuando existen alternativas.
+- La distribucion elegida determina automaticamente la cantidad de subcanchas
+  y se guarda como JSON solo como detalle interno de persistencia.
+- El backend valida la regla elegida dentro de la transaccion y mantiene los
+  locks de reserva sobre todo el arbol, incluso cuando la regla cambia el
+  deporte de una cancha hija.

@@ -71,7 +71,7 @@ function checkValue(key: string, col: ColumnDef, value: unknown): string | undef
     if (dateError) return dateError;
   }
 
-  if (col.options && !col.options.some((o) => o.value === value)) {
+  if (col.options && !col.options.some((o) => String(o.value) === String(value))) {
     return `${key} must be one of: ${col.options.map((o) => o.value).join(', ')}`;
   }
 

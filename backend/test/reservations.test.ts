@@ -69,7 +69,7 @@ test('normalizeLayout rejects overlapping rectangles', () => {
         ],
         2
       ),
-    /overlap/
+    /superponen/
   );
 });
 

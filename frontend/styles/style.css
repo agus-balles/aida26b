@@ -193,6 +193,26 @@ form {
     margin-bottom: 16px;
 }
 
+.partition-layout-preview {
+    position: relative;
+    width: min(100%, 260px);
+    aspect-ratio: 2 / 1;
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+
+.partition-layout-cell {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    border: 1px solid var(--surface);
+    background: var(--primary);
+    color: white;
+    font-weight: 600;
+}
+
 .field-error {
     display: block;
     margin-top: 4px;
@@ -252,15 +272,10 @@ select:focus {
 }
 
 .top-bar,
-.toolbar,
-.admin-actions {
+.toolbar {
     display: flex;
     gap: 10px;
     align-items: center;
-}
-
-#admin-actions[hidden] {
-    display: none;
 }
 
 .top-bar {

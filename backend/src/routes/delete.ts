@@ -63,6 +63,14 @@ export async function deleteHandler(
   const queryResponse: Response = await tryQuery(pool, query, pkValues);
 
   if (!queryResponse.success) {
+    if (queryResponse.code === '23503') {
+      return res.status(409).json({
+        success: false,
+        data: undefined,
+        message: 'No se puede eliminar porque este registro está siendo utilizado.',
+      });
+    }
+
     return sendErrorMessage(res, queryResponse.message);
   }
 
