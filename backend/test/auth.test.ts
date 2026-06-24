@@ -6,11 +6,13 @@ import { app, pool } from '../src/server';
 import { hashPassword } from '../src/auth';
 
 class FakeDb {
-  constructor(users) {
+  constructor(users, userCompanies = []) {
     this.users = users;
     this.sessions = [];
     this.audit = [];
     this.companies = [];
+    this.userCompanies = userCompanies;
+    this.companySports = [];
     this.nextUserId = Math.max(...users.map((user) => user.id)) + 1;
     this.nextCompanyId = 1;
   }
@@ -85,6 +87,17 @@ class FakeDb {
         return { rows: [{ count: this.companies.length }] };
       }
       return { rows: this.companies };
+    }
+    if (sql.includes('FROM auth.user_companies WHERE user_id')) {
+      return {
+        rows: this.userCompanies
+          .filter((link) => link.user_id === params[0])
+          .map((link) => ({ company_id: link.company_id, role: link.role })),
+      };
+    }
+    if (sql.startsWith('INSERT INTO company_sports')) {
+      this.companySports.push({ company_id: params[0], sport_id: params[1] });
+      return { rows: [{ company_id: params[0], sport_id: params[1] }] };
     }
     if (sql.startsWith('INSERT INTO companies')) {
       if (this.companies.some((company) => company.name === params[0] && company.city === params[4])) {
@@ -265,5 +278,34 @@ test('first login users must change password before using the app', async () => 
     assert.equal(changed.status, 200);
     assert.equal(changed.body.user.must_change_password, false);
     assert.equal((await request(baseUrl, '/api/companies', { cookie: tempCookie })).status, 200);
+  });
+});
+
+test('company-scoped users may only write their own company', async () => {
+  const staff = await hashPassword('staffpass1');
+  const db = new FakeDb(
+    [
+      { id: 1, username: 'admin', email: null, role: 'admin', is_active: true, must_change_password: false, password_hash: staff.passwordHash, password_salt: staff.passwordSalt },
+      { id: 4, username: 'staff1', email: null, role: 'editor', is_active: true, must_change_password: false, password_hash: staff.passwordHash, password_salt: staff.passwordSalt },
+    ],
+    [{ user_id: 4, company_id: 1, role: 'staff' }]
+  );
+
+  await withServer(db, async (baseUrl) => {
+    const cookie = await login(baseUrl, 'staff1', 'staffpass1');
+
+    const ownCompany = await request(baseUrl, '/api/company_sports', {
+      method: 'POST',
+      cookie,
+      body: { company_id: 1, sport_id: 1 },
+    });
+    assert.equal(ownCompany.status, 201);
+
+    const otherCompany = await request(baseUrl, '/api/company_sports', {
+      method: 'POST',
+      cookie,
+      body: { company_id: 2, sport_id: 1 },
+    });
+    assert.equal(otherCompany.status, 403);
   });
 });

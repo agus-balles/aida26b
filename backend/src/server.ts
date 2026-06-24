@@ -19,6 +19,7 @@ import { getHandler } from './routes/get';
 import { putHandler } from './routes/put';
 import { postHandler } from './routes/post';
 import { deleteHandler } from './routes/delete';
+import { enforceCompanyScope } from './companyAccess';
 
 // Load environment variables before reading process.env
 dotenv.config();
@@ -468,6 +469,10 @@ app.post(
       });
     }
 
+    if (!(await enforceCompanyScope(pool, req, res, req.params.tableName))) {
+      return;
+    }
+
     return postHandler(req, res, pool);
   }
 );
@@ -478,6 +483,10 @@ app.put(
   requirePasswordReady,
   requireBusinessWrite,
   async (req, res) => {
+    if (!(await enforceCompanyScope(pool, req, res, req.params.tableName))) {
+      return;
+    }
+
     return putHandler(req, res, pool);
   }
 );
@@ -488,6 +497,10 @@ app.delete(
   requirePasswordReady,
   requireBusinessWrite,
   async (req, res) => {
+    if (!(await enforceCompanyScope(pool, req, res, req.params.tableName))) {
+      return;
+    }
+
     return deleteHandler(req, res, pool);
   }
 );

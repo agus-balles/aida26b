@@ -80,6 +80,17 @@ test('getAtomicCourtIds returns leaf courts for a large court', () => {
   );
 });
 
+test('reserving a subcourt locks only that atomic court, not its siblings', () => {
+  // Spec: "Reservar una subcancha bloquea la grande, pero no sus hermanas."
+  assert.deepEqual(getAtomicCourtIds(courtTree(), 5), [5]);
+});
+
+test('reserving an intermediate court locks its own descendants only', () => {
+  // Spec: reserving a soccer_8 blocks its three soccer_5 children (5,6,7)
+  // but not the independent soccer_5 courts under the other soccer_8 groups.
+  assert.deepEqual(getAtomicCourtIds(courtTree(), 2), [5, 6, 7]);
+});
+
 test('compaction keeps filling the already-open parent group', () => {
   const courts = courtTree();
 

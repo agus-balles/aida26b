@@ -353,6 +353,12 @@ select:focus {
     background-color: #d6d8db;
 }
 
+.court-tile[data-status="unavailable"],
+.slot-btn[data-status="unavailable"] {
+    background-color: #b3b8bf;
+    color: #4a4f55;
+}
+
 .availability-slots,
 .availability-booking {
     display: flex;
