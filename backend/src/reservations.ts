@@ -707,7 +707,6 @@ export function getCompanyAvailability(pool: Pool) {
   return async (req: Request, res: Response) => {
     try {
       const companyId = readPositiveInteger(req.params.companyId, 'companyId');
-      await requireCompanyAccess(pool, req, companyId, false);
 
       const date = stringValue(req.query.date);
       const sportId = readPositiveInteger(req.query.sport_id, 'sport_id');
@@ -843,7 +842,6 @@ export function holdBooking(pool: Pool) {
 
       await client.query('BEGIN');
       await expireHeldBookings(client);
-      await requireCompanyAccess(client, req, companyId, false);
       await validateTimeBlock(client, companyId, durationMinutes);
 
       const court = await fetchSelectedCourt(client, companyId, courtId, sportId);
@@ -942,7 +940,7 @@ export function confirmBooking(pool: Pool) {
       }
 
       const booking = current.rows[0];
-      await requireCompanyAccess(client, req, Number(booking.company_id), false);
+      await requireCompanyAccess(client, req, Number(booking.company_id), true);
 
       if (booking.status !== 'held') {
         throw new HttpError(409, { error: 'La reserva ya no está pendiente de confirmación.' });
@@ -991,7 +989,7 @@ export function cancelBooking(pool: Pool) {
       }
 
       const booking = current.rows[0];
-      await requireCompanyAccess(client, req, Number(booking.company_id), false);
+      await requireCompanyAccess(client, req, Number(booking.company_id), true);
 
       await client.query('DELETE FROM booking_locks WHERE booking_id = $1', [bookingId]);
 

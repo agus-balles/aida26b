@@ -78,6 +78,38 @@ class FakeDb {
       user.must_change_password = sql.includes('must_change_password = true');
       return { rows: [publicRow(user)] };
     }
+    if (sql.startsWith('SELECT id, username, email, role, is_active, must_change_password FROM auth.users')) {
+      return { rows: this.users.map(publicRow) };
+    }
+    if (sql.includes('FROM auth.user_companies uc JOIN companies c')) {
+      return {
+        rows: this.userCompanies
+          .filter((link) => link.user_id === params[0])
+          .map((link) => ({
+            ...link,
+            company_name: this.companies.find((company) => company.id === link.company_id)?.name,
+          })),
+      };
+    }
+    if (sql.startsWith('INSERT INTO auth.user_companies')) {
+      const existing = this.userCompanies.find(
+        (link) => link.user_id === params[0] && link.company_id === params[1]
+      );
+      if (existing) {
+        existing.role = params[2];
+      } else {
+        this.userCompanies.push({ user_id: params[0], company_id: params[1], role: params[2] });
+      }
+      return { rows: [{ user_id: params[0], company_id: params[1], role: params[2] }] };
+    }
+    if (sql.startsWith('DELETE FROM auth.user_companies')) {
+      const index = this.userCompanies.findIndex(
+        (link) => link.user_id === params[0] && link.company_id === params[1]
+      );
+      if (index === -1) return { rows: [], rowCount: 0 };
+      const [removed] = this.userCompanies.splice(index, 1);
+      return { rows: [removed], rowCount: 1 };
+    }
     if (sql.startsWith('SELECT * FROM companies ORDER BY')) {
       return { rows: this.companies };
     }
@@ -214,10 +246,10 @@ test('reader can read but cannot mutate business data', async () => {
   });
 });
 
-test('duplicate company identity returns conflict', async () => {
+test('admin receives a conflict for duplicate company identity', async () => {
   const db = await makeDb();
   await withServer(db, async (baseUrl) => {
-    const cookie = await login(baseUrl, 'editor', 'editorpass');
+    const cookie = await login(baseUrl, 'admin', 'adminpass');
     const company = { name: 'Club Sur', email: '', phone: '', address: '', city: 'La Plata', timezone: 'America/Argentina/Buenos_Aires' };
 
     assert.equal((await request(baseUrl, '/api/companies', { method: 'POST', cookie, body: company })).status, 201);
@@ -225,7 +257,7 @@ test('duplicate company identity returns conflict', async () => {
   });
 });
 
-test('editor can create companies but cannot manage users', async () => {
+test('unlinked non-admin users cannot create companies or manage users', async () => {
   const db = await makeDb();
   await withServer(db, async (baseUrl) => {
     const cookie = await login(baseUrl, 'editor', 'editorpass');
@@ -234,8 +266,7 @@ test('editor can create companies but cannot manage users', async () => {
       cookie,
       body: { name: 'Club Centro', email: '', phone: '', address: '', city: 'CABA', timezone: 'America/Argentina/Buenos_Aires' },
     });
-    assert.equal(createCompany.status, 201);
-    assert.equal(db.companies.find((company) => company.name === 'Club Centro').city, 'CABA');
+    assert.equal(createCompany.status, 403);
 
     const createUser = await request(baseUrl, '/api/admin/users', { method: 'POST', cookie, body: { username: 'other', password: 'otherpass', role: 'reader' } });
     assert.equal(createUser.status, 403);
@@ -256,6 +287,33 @@ test('admin can create users and reset passwords', async () => {
     const newCookie = await login(baseUrl, 'newreader', 'secondpass');
     const me = await request(baseUrl, '/api/auth/me', { cookie: newCookie });
     assert.equal(me.body.user.must_change_password, true);
+  });
+});
+
+test('admin can assign and remove company roles', async () => {
+  const db = await makeDb();
+  db.companies.push({ id: 1, name: 'Club Norte', city: 'CABA', is_active: true });
+
+  await withServer(db, async (baseUrl) => {
+    const adminCookie = await login(baseUrl, 'admin', 'adminpass');
+    const saved = await request(baseUrl, '/api/admin/users/2/companies', {
+      method: 'POST',
+      cookie: adminCookie,
+      body: { company_id: 1, role: 'manager' },
+    });
+    assert.equal(saved.status, 201);
+
+    const links = await request(baseUrl, '/api/admin/users/2/companies', {
+      cookie: adminCookie,
+    });
+    assert.equal(links.status, 200);
+    assert.equal(links.body.data[0].role, 'manager');
+
+    const removed = await request(baseUrl, '/api/admin/users/2/companies/1', {
+      method: 'DELETE',
+      cookie: adminCookie,
+    });
+    assert.equal(removed.status, 200);
   });
 });
 

@@ -11,6 +11,7 @@ import {
 } from "../helpers";
 
 import { getPkFields } from "../../../shared/src/utils/utils";
+import { getCompanyReadConstraint } from "../companyAccess";
 
 import {
   sendSuccessOperationMessage,
@@ -32,7 +33,8 @@ import {
 export async function getHandler(
   req: express.Request,
   res: express.Response,
-  pool: Pool
+  pool: Pool,
+  readableCompanyIds: number[] | null
 ) {
   const tableNameParam = req.params.tableName;
 
@@ -44,10 +46,17 @@ export async function getHandler(
   const entityName = getEntityName(tableName);
 
   if (isListRequest(req.query)) {
-    return getListOfTable(pool, res, tableName, req.query);
+    return getListOfTable(pool, res, tableName, req.query, readableCompanyIds);
   }
 
-  return getRowOfTable(pool, res, tableName, req.query, entityName);
+  return getRowOfTable(
+    pool,
+    res,
+    tableName,
+    req.query,
+    entityName,
+    readableCompanyIds
+  );
 }
 
 /** Query builder used by list/table views. */
@@ -55,12 +64,17 @@ export function buildListQuery(
   tableNameOrCTE: string,
   query: express.Request["query"],
   filterConfig: Record<string, ColumnDef>,
-  defaultSort: string | string[]
+  defaultSort: string | string[],
+  readConstraint?: { condition: string; values: number[] } | null
 ) {
   const conditions: string[] = [];
-  const values: unknown[] = [];
-  let paramIndex = 1;
+  const values: unknown[] = [...(readConstraint?.values ?? [])];
+  let paramIndex = values.length + 1;
   const allowedColumns = Object.keys(filterConfig);
+
+  if (readConstraint) {
+    conditions.push(readConstraint.condition);
+  }
 
   for (const [key, rawValue] of Object.entries(query)) {
     if (!key.startsWith("filter_") || rawValue == null || rawValue === "") {
@@ -340,16 +354,23 @@ async function getListOfTable(
   pool: Pool,
   res: express.Response,
   tableName: TableKey,
-  query: express.Request["query"]
+  query: express.Request["query"],
+  readableCompanyIds: number[] | null
 ) {
   try {
     const defaultSort = getPkFields(tableName);
+    const readConstraint = getCompanyReadConstraint(
+      tableName,
+      readableCompanyIds,
+      1
+    );
 
     const { dataQuery, dataValues, countQuery, countValues } = buildListQuery(
       getBaseSelectQuery(tableName),
       query,
       getListFilterConfig(tableName),
-      defaultSort
+      defaultSort,
+      readConstraint
     );
 
     const [dataResult, countResult] = await Promise.all([
@@ -370,7 +391,8 @@ async function getListOfTable(
 async function getRowByPKs(
   pool: Pool,
   tableName: TableKey,
-  pkValues: unknown[]
+  pkValues: unknown[],
+  readableCompanyIds: number[] | null
 ) {
   const whereArguments = columnNamesEqualsNumber(
     getPkFields(tableName),
@@ -378,13 +400,22 @@ async function getRowByPKs(
     " AND "
   );
 
+  const readConstraint = getCompanyReadConstraint(
+    tableName,
+    readableCompanyIds,
+    pkValues.length + 1
+  );
   const queryStatement = `
     SELECT *
     FROM ${tableName}
     WHERE ${whereArguments}
+    ${readConstraint ? `AND ${readConstraint.condition}` : ''}
   `;
 
-  return tryQuery(pool, queryStatement, pkValues);
+  return tryQuery(pool, queryStatement, [
+    ...pkValues,
+    ...(readConstraint?.values ?? []),
+  ]);
 }
 
 async function getRowOfTable(
@@ -392,7 +423,8 @@ async function getRowOfTable(
   res: express.Response,
   tableName: TableKey,
   query: express.Request["query"],
-  entityName: string
+  entityName: string,
+  readableCompanyIds: number[] | null
 ) {
   const pk = validateOnlyPk(tableName, query);
 
@@ -409,7 +441,8 @@ async function getRowOfTable(
   const responseQuery: QueryResponse = await getRowByPKs(
     pool,
     tableName,
-    pkValues
+    pkValues,
+    readableCompanyIds
   );
 
   if (!responseQuery.success) {

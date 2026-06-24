@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import {
   decideCompanyScopeAccess,
+  getCompanyReadConstraint,
   resolveCompanyScope,
 } from '../src/companyAccess';
 
@@ -15,10 +16,10 @@ test('admin bypasses company scoping', () => {
   );
 });
 
-test('unlinked global users keep writing any company', () => {
+test('unlinked non-admin users cannot write company data', () => {
   assert.equal(
     decideCompanyScopeAccess(editor, [], { kind: 'company', companyId: 9 }),
-    true
+    false
   );
 });
 
@@ -38,9 +39,9 @@ test('linked users cannot create new companies (admin-only scope)', () => {
   assert.equal(decideCompanyScopeAccess(editor, links, { kind: 'admin-only' }), false);
 });
 
-test('linked users may still edit global catalogs', () => {
+test('non-admin users cannot edit global catalogs', () => {
   const links = [{ company_id: 1, role: 'staff' }];
-  assert.equal(decideCompanyScopeAccess(editor, links, { kind: 'none' }), true);
+  assert.equal(decideCompanyScopeAccess(editor, links, { kind: 'none' }), false);
 });
 
 const noopDb = { query: async () => ({ rows: [] }) } as never;
@@ -72,4 +73,18 @@ test('resolveCompanyScope resolves company via court for court_prices', async ()
   } as never;
   const scope = await resolveCompanyScope(db, 'court_prices', 'POST', { court_id: 42 }, {});
   assert.deepEqual(scope, { kind: 'company', companyId: 5 });
+});
+
+test('company-scoped reads add an ownership condition', () => {
+  assert.deepEqual(
+    getCompanyReadConstraint('courts', [1, 4], 1),
+    { condition: '"company_id" = ANY($1::bigint[])', values: [1, 4] }
+  );
+  assert.deepEqual(
+    getCompanyReadConstraint('court_prices', [4], 2),
+    {
+      condition: '"court_id" IN (SELECT id FROM courts WHERE company_id = ANY($2::bigint[]))',
+      values: [4],
+    }
+  );
 });

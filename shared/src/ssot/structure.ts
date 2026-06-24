@@ -664,6 +664,22 @@ export const structure = {
     confirm: { es: 'Confirmar', en: 'Confirm' },
     bookingHeld: { es: 'Reserva bloqueada', en: 'Booking held' },
     bookingConfirmed: { es: 'Reserva confirmada', en: 'Booking confirmed' },
+    publicBooking: { es: 'Reservar cancha', en: 'Book a court' },
+    holdPendingOperator: {
+      es: 'Tu solicitud quedó retenida. La empresa debe confirmarla antes de que venza.',
+      en: 'Your request is on hold. The company must confirm it before it expires.',
+    },
+    companyPermissions: { es: 'Permisos', en: 'Permissions' },
+    user: { es: 'Usuario', en: 'User' },
+    companyRole: { es: 'Rol en empresa', en: 'Company role' },
+    savePermission: { es: 'Guardar permiso', en: 'Save permission' },
+    removePermission: { es: 'Quitar permiso', en: 'Remove permission' },
+    permissionSaved: { es: 'Permiso guardado', en: 'Permission saved' },
+    permissionRemoved: { es: 'Permiso eliminado', en: 'Permission removed' },
+    owner: { es: 'Propietario', en: 'Owner' },
+    manager: { es: 'Responsable', en: 'Manager' },
+    staff: { es: 'Operador', en: 'Staff' },
+    viewer: { es: 'Consulta', en: 'Viewer' },
 
     // Auth / session messages
     sessionExpired: { es: 'La sesión expiró', en: 'Session expired' },

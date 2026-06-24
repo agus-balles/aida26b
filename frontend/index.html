@@ -7,8 +7,14 @@
     <!-- Styles are bundled by webpack via `import '../styles/style.css'` in src/app.ts -->
 </head>
 <body>
-    <div class="container">
-        <h1 id="app-title">Sistema de Reservas de Canchas</h1>
+    <header class="app-header">
+        <div class="header-content">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <h1 id="app-title">Sistema de Reservas de Canchas</h1>
+        </div>
+    </header>
+
+    <main class="container">
 
         <section id="auth-section" class="auth-section">
             <h2 id="login-title">Ingresar</h2>
@@ -24,6 +30,9 @@
                 <p id="login-error" class="message" hidden></p>
                 <button id="login-submit-btn" type="submit" class="add-btn">Ingresar</button>
             </form>
+        </section>
+
+        <section id="public-booking-section" class="public-booking-section">
         </section>
 
         <section id="password-section" class="auth-section" style="display: none;">
@@ -42,17 +51,17 @@
             </form>
         </section>
 
-        <div id="app-shell" style="display: none;">
+        <div id="app-shell" class="app-shell" style="display: none;">
             <div class="top-bar">
                 <span id="current-user"></span>
                 <button id="logout-btn" class="logout-btn">Salir</button>
             </div>
 
-            <nav id='general-nav' class="nav">
-                <nav id="table-nav" class="nav">
-                </nav>
-                <nav id="menu-nav" class='nav'>
-                </nav>
+            <nav id="general-nav" class="nav" aria-label="Navegación principal">
+                <div id="table-nav" class="nav">
+                </div>
+                <div id="menu-nav" class="nav">
+                </div>
             </nav>
 
             <div id="records-section" class="section active">
@@ -62,12 +71,14 @@
                     <button id="add-record-btn" class="add-btn"></button>
                 </div>
                 <div id="record-form" style="display: none;"></div>
-                <table id="records-table">
-                    <thead></thead>
-                    <tbody></tbody>
-                </table>
+                <div class="table-surface">
+                    <table id="records-table">
+                        <thead></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
         </div>
-    </div>
+    </main>
 </body>
 </html>

@@ -14,7 +14,7 @@ export function createAppGivenPool(pool: Pool) {
   app.use(cors());
   app.use(express.json());
 
-  app.get('/api/:tableName', async (req, res) => getHandler(req, res, pool));
+  app.get('/api/:tableName', async (req, res) => getHandler(req, res, pool, null));
   app.post('/api/:tableName', async (req, res) => postHandler(req, res, pool));
   app.put('/api/:tableName', async (req, res) => putHandler(req, res, pool));
   app.delete('/api/:tableName', async (req, res) => deleteHandler(req, res, pool));

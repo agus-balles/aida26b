@@ -17,8 +17,9 @@ auth shell) is implemented and matches the spec's data model and acceptance
 criteria. The gaps were concentrated in **(1) multi-company write isolation not
 being enforced on the generic CRUD routes**, **(2) test/tooling rot that made
 the suite un-runnable locally**, and **(3) small presentation/cleanup issues**.
-Those are now fixed and verified. A few items that require a product decision
-are logged at the end.
+Those are now fixed and verified. The initially pending product decisions are
+recorded below for context and their implemented outcomes are appended at the
+end of this document.
 
 ### Verification evidence (after fixes)
 
@@ -163,7 +164,7 @@ These were verified by reading the code against the spec; no change needed.
 
 ---
 
-## C. Logged for a product decision (intentionally NOT changed)
+## C. Historical decision record (superseded by the implementation update below)
 
 These are real divergences from the spec, but changing them is a
 security/product call rather than a clear bug fix, so they are documented rather
@@ -347,3 +348,57 @@ that broke `test:db` is already removed — B3).
      remain (rollback is clean).
 3. Run locally with `docker compose up -d database` then
    `npm --prefix backend run test:db`; wire the same into CI.
+
+---
+
+## F. Implemented decision outcomes — 2026-06-24
+
+### F1 — Strict access by company
+
+- The global `admin` manages every company and global catalog.
+- Every non-admin needs an explicit `auth.user_companies` relation. Without a
+  relation, they cannot read or mutate company-scoped data.
+- `owner`, `manager`, and `staff` are operational roles; `viewer` is read-only.
+  Global catalogs (`sports`, `court_partition_rules`) remain admin-managed.
+- The generic reader filters `companies`, `company_sports`,
+  `company_time_blocks`, `courts`, and `court_prices` by the user's linked
+  companies. The public availability flow is separate and intentionally stays
+  publicly readable.
+
+### F2 — Public availability and anonymous holds
+
+- `GET /api/public/companies`, `GET /api/public/companies/:companyId/sports`,
+  and `GET /api/public/companies/:companyId/time-blocks` expose only active
+  booking choices.
+- `GET /api/companies/:companyId/availability` and `POST /api/bookings/hold`
+  do not require a session. Anonymous holds persist with
+  `created_by_user_id = NULL` and retain the existing 10-minute expiry.
+- A dependency-free, in-memory sliding window limits public holds to 10 per IP
+  every 10 minutes. It is per backend process; a multi-replica deployment must
+  move this control to a shared store or the edge.
+- Confirming and cancelling remain authenticated operations and additionally
+  require an operational role for the booking's company.
+
+### F3 — User-company role administration
+
+- New admin-only routes (also requiring an active session and a changed
+  password):
+  - `GET /api/admin/users`
+  - `GET /api/admin/users/:id/companies`
+  - `POST /api/admin/users/:id/companies` with `{ company_id, role }`
+  - `DELETE /api/admin/users/:id/companies/:companyId`
+- The **Permisos** screen reuses the existing shell and lets an admin assign,
+  update, inspect, and remove `owner`, `manager`, `staff`, and `viewer` links.
+- IDs and roles are validated before persistence; successful changes are
+  audited without recording credentials, session material, salts, or hashes.
+
+### F4 — Public booking screen and local auth documentation
+
+- The login screen now includes the public booking map. Its selectors follow
+  the company → sport → duration dependency. An anonymous visitor receives a
+  clear pending-confirmation message after a successful hold and never receives
+  confirmation controls.
+- The signed-in availability view uses the same underlying controls; the
+  backend remains the final authorization authority for confirmation/cancel.
+- `auth.md` is retained as local documentation and ignored by Git, so it no
+  longer participates in the shared change set.

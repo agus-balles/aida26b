@@ -31,6 +31,11 @@ type AuthUser = {
   must_change_password: boolean;
 };
 
+type CompanyLink = {
+  company_id: number;
+  role: 'owner' | 'manager' | 'staff' | 'viewer';
+};
+
 type AvailabilityStatus =
   | 'available'
   | 'held'
@@ -112,6 +117,7 @@ const loginError = document.getElementById('login-error') as HTMLElement;
 
 const passwordForm = document.getElementById('password-form') as HTMLFormElement;
 const passwordError = document.getElementById('password-error') as HTMLElement;
+const publicBookingSection = document.getElementById('public-booking-section') as HTMLElement;
 
 const currentUserEl = document.getElementById('current-user') as HTMLElement;
 const logoutBtn = document.getElementById('logout-btn') as HTMLButtonElement;
@@ -137,19 +143,40 @@ if (recordsSection.parentElement) {
   recordsSection.insertAdjacentElement('afterend', availabilitySection);
 }
 
+const permissionsSection = document.createElement('div');
+permissionsSection.id = 'permissions-section';
+permissionsSection.className = 'section';
+permissionsSection.style.display = 'none';
+
+if (availabilitySection.parentElement) {
+  availabilitySection.insertAdjacentElement('afterend', permissionsSection);
+}
+
 const tableKeys = Object.keys(structure.tables) as TableKey[];
 const menuKeys = Object.keys(structure.menu) as Array<keyof typeof structure.menu>;
 const tableNavButtons = {} as Record<TableKey, HTMLButtonElement>;
 let availabilityNavButton: HTMLButtonElement | null = null;
+let permissionsNavButton: HTMLButtonElement | null = null;
 
 // -----------------------------------------------------------------------------
 // Auth/session state
 // -----------------------------------------------------------------------------
 
 let currentUser: AuthUser | null = null;
+let currentCompanyLinks: CompanyLink[] = [];
 
 function canWriteBusiness(): boolean {
-  return currentUser?.role === 'admin' || currentUser?.role === 'editor';
+  return currentUser?.role === 'admin' || currentCompanyLinks.some(
+    (link) => link.role === 'owner' || link.role === 'manager' || link.role === 'staff'
+  );
+}
+
+function canWriteTable(tableKey: TableKey, creating = false): boolean {
+  if (currentUser?.role === 'admin') return true;
+  if (!canWriteBusiness()) return false;
+  if (tableKey === 'sports' || tableKey === 'court_partition_rules') return false;
+  if (creating && tableKey === 'companies') return false;
+  return true;
 }
 
 function setMessage(message = ''): void {
@@ -159,36 +186,47 @@ function setMessage(message = ''): void {
 
 function showLogin(message = ''): void {
   currentUser = null;
+  currentCompanyLinks = [];
 
   authSection.style.display = 'block';
   passwordSection.style.display = 'none';
+  publicBookingSection.style.display = 'block';
   appShell.style.display = 'none';
+  permissionsNavButton?.setAttribute('hidden', '');
 
   loginError.textContent = message;
   loginError.hidden = !message;
 }
 
-function showPasswordChange(user: AuthUser): void {
+function showPasswordChange(user: AuthUser, companyLinks: CompanyLink[]): void {
   currentUser = user;
+  currentCompanyLinks = companyLinks;
 
   authSection.style.display = 'none';
   passwordSection.style.display = 'block';
+  publicBookingSection.style.display = 'none';
   appShell.style.display = 'none';
 
   passwordError.hidden = true;
 }
 
-function showApp(user: AuthUser): void {
+function showApp(user: AuthUser, companyLinks: CompanyLink[] = []): void {
   if (user.must_change_password) {
-    showPasswordChange(user);
+    showPasswordChange(user, companyLinks);
     return;
   }
 
   currentUser = user;
+  currentCompanyLinks = companyLinks;
 
   authSection.style.display = 'none';
   passwordSection.style.display = 'none';
+  publicBookingSection.style.display = 'none';
   appShell.style.display = 'block';
+
+  if (permissionsNavButton) {
+    permissionsNavButton.hidden = user.role !== 'admin';
+  }
 
   currentUserEl.textContent = `${user.username} (${user.role})`;
 
@@ -450,7 +488,7 @@ function mapInputToRenderer(input?: ColumnDef['input']): RendererKey {
 // -----------------------------------------------------------------------------
 
 let activeTableKey: TableKey = tableKeys[0];
-let activeCustomView: 'availability' | null = null;
+let activeCustomView: 'availability' | 'permissions' | null = null;
 
 type FilterEntry = {
   negated: boolean;
@@ -591,6 +629,10 @@ function updateNavButtonsText(): void {
   if (availabilityNavButton) {
     availabilityNavButton.textContent = getLocalizedText(structure.commonText.availability);
   }
+
+  if (permissionsNavButton) {
+    permissionsNavButton.textContent = getLocalizedText(structure.commonText.companyPermissions);
+  }
 }
 
 function createTableNavButtons(): void {
@@ -615,6 +657,13 @@ function createTableNavButtons(): void {
   availabilityNavButton.textContent = getLocalizedText(structure.commonText.availability);
   availabilityNavButton.addEventListener('click', () => showAvailabilityView());
   navContainer.appendChild(availabilityNavButton);
+
+  permissionsNavButton = document.createElement('button');
+  permissionsNavButton.id = 'permissions-btn';
+  permissionsNavButton.textContent = getLocalizedText(structure.commonText.companyPermissions);
+  permissionsNavButton.hidden = true;
+  permissionsNavButton.addEventListener('click', () => showPermissionsView());
+  navContainer.appendChild(permissionsNavButton);
 }
 
 function resetStateForTable(tableKey: TableKey): void {
@@ -640,7 +689,9 @@ function showSection(section: TableKey, pushState = true): void {
   activeCustomView = null;
   recordsSection.style.display = 'block';
   availabilitySection.style.display = 'none';
+  permissionsSection.style.display = 'none';
   availabilityNavButton?.classList.remove('active');
+  permissionsNavButton?.classList.remove('active');
 
   if (activeTableKey !== section && pushState) {
     resetStateForTable(section);
@@ -665,7 +716,7 @@ function showSection(section: TableKey, pushState = true): void {
     getLocalizedText(tableConfig.addButtonLabel) ||
     `${getLocalizedText(structure.commonText.add)} ${getLocalizedText(tableConfig.uiName)}`;
 
-  addRecordBtn.style.display = canWriteBusiness() ? 'inline-block' : 'none';
+  addRecordBtn.style.display = canWriteTable(section, true) ? 'inline-block' : 'none';
 
   hideAnyForm();
   renderFilters(section);
@@ -745,6 +796,8 @@ function applyLanguageToUI(): void {
   if (currentUser && !currentUser.must_change_password) {
     if (activeCustomView === 'availability') {
       showAvailabilityView();
+    } else if (activeCustomView === 'permissions') {
+      showPermissionsView();
     } else {
       showSection(activeTableKey, false);
     }
@@ -872,7 +925,7 @@ function renderAnyTable<K extends TableKey>(
   const thead = sharedTable.querySelector('thead')!;
   const tbody = sharedTable.querySelector('tbody')!;
   const tableStructure = structure.tables[tableKey];
-  const showActions = canWriteBusiness();
+  const showActions = canWriteTable(tableKey);
   const showEditAction = canEditTable(tableStructure);
 
   thead.innerHTML = '';
@@ -1093,24 +1146,30 @@ function fillSelect(
     const value = String(record[valueField] ?? '');
 
     option.value = value;
-    option.textContent = `${value} - ${String(record[labelField] ?? '')}`;
+    option.textContent = String(record[labelField] ?? '');
     select.appendChild(option);
   });
 }
 
-async function loadTimeBlockOptions(
+async function loadAvailabilityOptions(
   companySelect: HTMLSelectElement,
+  sportSelect: HTMLSelectElement,
   durationSelect: HTMLSelectElement
 ): Promise<void> {
+  sportSelect.innerHTML = '';
   durationSelect.innerHTML = '';
 
   if (!companySelect.value) return;
 
-  const rows = await fetchRows(
-    `/company_time_blocks?page=1&filter_company_id=${encodeURIComponent(companySelect.value)}`
-  );
+  const companyId = encodeURIComponent(companySelect.value);
+  const [sports, timeBlocks] = await Promise.all([
+    fetchRows(`/public/companies/${companyId}/sports`),
+    fetchRows(`/public/companies/${companyId}/time-blocks`),
+  ]);
 
-  rows.forEach((row) => {
+  fillSelect(sportSelect, sports, 'id', 'name');
+
+  timeBlocks.forEach((row) => {
     const record = row as Record<string, unknown>;
     const minutes = String(record.duration_minutes ?? '');
 
@@ -1127,21 +1186,28 @@ function showAvailabilityView(): void {
   activeCustomView = 'availability';
   recordsSection.style.display = 'none';
   availabilitySection.style.display = 'block';
+  permissionsSection.style.display = 'none';
   hideAnyForm();
   setMessage();
 
   Object.values(tableNavButtons).forEach((button) => button.classList.remove('active'));
   availabilityNavButton?.classList.add('active');
+  permissionsNavButton?.classList.remove('active');
 
-  renderAvailabilityControls();
+  void renderAvailabilityControls(availabilitySection, canWriteBusiness());
 }
 
-async function renderAvailabilityControls(): Promise<void> {
-  availabilitySection.innerHTML = '';
+async function renderAvailabilityControls(
+  container: HTMLElement,
+  operatorCanConfirm: boolean
+): Promise<void> {
+  container.innerHTML = '';
 
   const title = document.createElement('h2');
-  title.textContent = getLocalizedText(structure.commonText.availability);
-  availabilitySection.appendChild(title);
+  title.textContent = getLocalizedText(
+    operatorCanConfirm ? structure.commonText.availability : structure.commonText.publicBooking
+  );
+  container.appendChild(title);
 
   const form = document.createElement('form');
   form.className = 'availability-controls';
@@ -1166,37 +1232,44 @@ async function renderAvailabilityControls(): Promise<void> {
   const output = document.createElement('div');
   output.className = 'availability-output';
 
-  availabilitySection.appendChild(form);
-  availabilitySection.appendChild(output);
+  container.appendChild(form);
+  container.appendChild(output);
 
   try {
-    const [companies, sports] = await Promise.all([
-      fetchRows('/companies?page=1'),
-      fetchRows('/sports?page=1'),
-    ]);
+    const companies = await fetchRows('/public/companies');
 
     fillSelect(companySelect, companies, 'id', 'name');
-    fillSelect(sportSelect, sports, 'id', 'name');
-    await loadTimeBlockOptions(companySelect, durationSelect);
+    await loadAvailabilityOptions(companySelect, sportSelect, durationSelect);
 
     companySelect.addEventListener('change', async () => {
-      await loadTimeBlockOptions(companySelect, durationSelect);
+      await loadAvailabilityOptions(companySelect, sportSelect, durationSelect);
     });
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      await loadAvailability(companySelect, sportSelect, dateInput, durationSelect, output);
+      await loadAvailability(
+        companySelect,
+        sportSelect,
+        dateInput,
+        durationSelect,
+        output,
+        operatorCanConfirm
+      );
     });
 
     if (companySelect.value && sportSelect.value && durationSelect.value) {
-      await loadAvailability(companySelect, sportSelect, dateInput, durationSelect, output);
+      await loadAvailability(
+        companySelect,
+        sportSelect,
+        dateInput,
+        durationSelect,
+        output,
+        operatorCanConfirm
+      );
     }
   } catch (error) {
-    const message = (error as Error).message;
-    if (message !== 'Authentication required' && message !== 'Forbidden') {
-      setMessage(getLocalizedText(structure.commonText.errorLoadingData));
-      console.error('Error loading availability controls:', error);
-    }
+    output.textContent = getLocalizedText(structure.commonText.errorLoadingData);
+    console.error('Error loading availability controls:', error);
   }
 }
 
@@ -1223,7 +1296,8 @@ async function loadAvailability(
   sportSelect: HTMLSelectElement,
   dateInput: HTMLInputElement,
   durationSelect: HTMLSelectElement,
-  output: HTMLElement
+  output: HTMLElement,
+  operatorCanConfirm: boolean
 ): Promise<void> {
   if (!companySelect.value || !sportSelect.value || !dateInput.value || !durationSelect.value) {
     return;
@@ -1240,7 +1314,8 @@ async function loadAvailability(
   );
 
   if (!response.ok) {
-    return showErrorMessage(await errorMessage(response));
+    output.textContent = await errorMessage(response);
+    return;
   }
 
   const data = (await response.json()) as AvailabilityResponse;
@@ -1249,7 +1324,15 @@ async function loadAvailability(
     Number(sportSelect.value),
     Number(durationSelect.value),
     output,
-    () => loadAvailability(companySelect, sportSelect, dateInput, durationSelect, output)
+    () => loadAvailability(
+      companySelect,
+      sportSelect,
+      dateInput,
+      durationSelect,
+      output,
+      operatorCanConfirm
+    ),
+    operatorCanConfirm
   );
 }
 
@@ -1258,7 +1341,8 @@ function renderAvailabilityMap(
   sportId: number,
   durationMinutes: number,
   output: HTMLElement,
-  refresh: () => Promise<void>
+  refresh: () => Promise<void>,
+  operatorCanConfirm: boolean
 ): void {
   output.innerHTML = '';
 
@@ -1320,7 +1404,16 @@ function renderAvailabilityMap(
       button.textContent = `${formatSlotTime(slot.starts_at)}${price}`;
       button.disabled = slot.status !== 'available';
       button.addEventListener('click', () => {
-        renderBookingForm(data.company.id, selected, sportId, durationMinutes, slot, bookingPanel, refresh);
+        renderBookingForm(
+          data.company.id,
+          selected,
+          sportId,
+          durationMinutes,
+          slot,
+          bookingPanel,
+          refresh,
+          operatorCanConfirm
+        );
       });
 
       slotsPanel.appendChild(button);
@@ -1337,7 +1430,8 @@ function renderBookingForm(
   durationMinutes: number,
   slot: AvailabilitySlot,
   panel: HTMLElement,
-  refresh: () => Promise<void>
+  refresh: () => Promise<void>,
+  operatorCanConfirm: boolean
 ): void {
   panel.innerHTML = '';
 
@@ -1383,10 +1477,22 @@ function renderBookingForm(
       });
 
       if (!response.ok) {
-        return showErrorMessage(await errorMessage(response));
+        panel.textContent = await errorMessage(response);
+        return;
       }
 
       const data = (await response.json()) as { booking: { id: number } };
+
+      if (!operatorCanConfirm) {
+        panel.innerHTML = '';
+        const message = document.createElement('p');
+        message.className = 'booking-held-message';
+        message.textContent = getLocalizedText(structure.commonText.holdPendingOperator);
+        panel.appendChild(message);
+        await refresh();
+        return;
+      }
+
       setMessage(getLocalizedText(structure.commonText.bookingHeld));
 
       const confirmBtn = document.createElement('button');
@@ -1408,15 +1514,189 @@ function renderBookingForm(
       panel.innerHTML = '';
       panel.appendChild(confirmBtn);
     } catch (error) {
-      const message = (error as Error).message;
-      if (message !== 'Authentication required' && message !== 'Forbidden') {
-        setMessage(getLocalizedText(structure.commonText.errorSaving));
-        console.error('Error holding booking:', error);
-      }
+      panel.textContent = getLocalizedText(structure.commonText.errorSaving);
+      console.error('Error holding booking:', error);
     }
   });
 
   panel.appendChild(form);
+}
+
+function showPermissionsView(): void {
+  if (currentUser?.role !== 'admin') {
+    setMessage(getLocalizedText(structure.commonText.noPermission));
+    return;
+  }
+
+  activeCustomView = 'permissions';
+  recordsSection.style.display = 'none';
+  availabilitySection.style.display = 'none';
+  permissionsSection.style.display = 'block';
+  hideAnyForm();
+  setMessage();
+
+  Object.values(tableNavButtons).forEach((button) => button.classList.remove('active'));
+  availabilityNavButton?.classList.remove('active');
+  permissionsNavButton?.classList.add('active');
+
+  renderPermissionsView();
+}
+
+async function renderPermissionsView(): Promise<void> {
+  permissionsSection.innerHTML = '';
+
+  const title = document.createElement('h2');
+  title.textContent = getLocalizedText(structure.commonText.companyPermissions);
+  permissionsSection.appendChild(title);
+
+  const form = document.createElement('form');
+  form.className = 'company-permissions-form';
+
+  const userSelect = document.createElement('select');
+  const companySelect = document.createElement('select');
+  const roleSelect = document.createElement('select');
+
+  const roles: Array<{ value: CompanyLink['role']; label: LocalizedText }> = [
+    { value: 'owner', label: structure.commonText.owner },
+    { value: 'manager', label: structure.commonText.manager },
+    { value: 'staff', label: structure.commonText.staff },
+    { value: 'viewer', label: structure.commonText.viewer },
+  ];
+
+  roles.forEach((role) => {
+    const option = document.createElement('option');
+    option.value = role.value;
+    option.textContent = getLocalizedText(role.label);
+    roleSelect.appendChild(option);
+  });
+
+  appendAvailabilityControl(form, structure.commonText.user, userSelect);
+  appendAvailabilityControl(form, structure.commonText.company, companySelect);
+  appendAvailabilityControl(form, structure.commonText.companyRole, roleSelect);
+
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.textContent = getLocalizedText(structure.commonText.savePermission);
+  form.appendChild(submitBtn);
+
+  const linksOutput = document.createElement('div');
+  linksOutput.className = 'company-permissions-output';
+
+  permissionsSection.appendChild(form);
+  permissionsSection.appendChild(linksOutput);
+
+  const loadLinks = async () => {
+    linksOutput.innerHTML = '';
+
+    if (!userSelect.value) return;
+
+    const response = await apiFetch(
+      `/admin/users/${encodeURIComponent(userSelect.value)}/companies`
+    );
+
+    if (!response.ok) {
+      linksOutput.textContent = await errorMessage(response);
+      return;
+    }
+
+    const result = await response.json() as { data: Array<Record<string, unknown>> };
+    const table = document.createElement('table');
+    const header = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+
+    [structure.commonText.company, structure.commonText.companyRole, structure.commonText.actions]
+      .forEach((label) => {
+        const th = document.createElement('th');
+        th.textContent = getLocalizedText(label);
+        headerRow.appendChild(th);
+      });
+
+    header.appendChild(headerRow);
+    table.appendChild(header);
+
+    const body = document.createElement('tbody');
+    result.data.forEach((link) => {
+      const row = document.createElement('tr');
+      const companyCell = document.createElement('td');
+      const roleCell = document.createElement('td');
+      const actionsCell = document.createElement('td');
+      const removeBtn = document.createElement('button');
+
+      companyCell.textContent = String(link.company_name ?? '');
+      roleCell.textContent = getLocalizedText(
+        structure.commonText[String(link.role) as keyof typeof structure.commonText] ?? String(link.role)
+      );
+      removeBtn.type = 'button';
+      removeBtn.className = 'delete-btn';
+      removeBtn.textContent = getLocalizedText(structure.commonText.removePermission);
+      removeBtn.addEventListener('click', async () => {
+        const response = await apiFetch(
+          `/admin/users/${encodeURIComponent(userSelect.value)}/companies/${encodeURIComponent(String(link.company_id))}`,
+          { method: 'DELETE' }
+        );
+
+        if (!response.ok) {
+          setMessage(await errorMessage(response));
+          return;
+        }
+
+        setMessage(getLocalizedText(structure.commonText.permissionRemoved));
+        await loadLinks();
+      });
+
+      actionsCell.appendChild(removeBtn);
+      row.append(companyCell, roleCell, actionsCell);
+      body.appendChild(row);
+    });
+
+    table.appendChild(body);
+    linksOutput.appendChild(table);
+  };
+
+  try {
+    const [users, companies] = await Promise.all([
+      fetchRows('/admin/users'),
+      fetchAllRows('companies'),
+    ]);
+
+    fillSelect(userSelect, users, 'id', 'username');
+    fillSelect(companySelect, companies, 'id', 'name');
+
+    userSelect.addEventListener('change', () => {
+      loadLinks().catch((error) => {
+        linksOutput.textContent = getLocalizedText(structure.commonText.errorLoadingData);
+        console.error('Error loading user company links:', error);
+      });
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const response = await apiFetch(
+        `/admin/users/${encodeURIComponent(userSelect.value)}/companies`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            company_id: Number(companySelect.value),
+            role: roleSelect.value,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        setMessage(await errorMessage(response));
+        return;
+      }
+
+      setMessage(getLocalizedText(structure.commonText.permissionSaved));
+      await loadLinks();
+    });
+
+    await loadLinks();
+  } catch (error) {
+    linksOutput.textContent = getLocalizedText(structure.commonText.errorLoadingData);
+    console.error('Error loading permissions view:', error);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -2378,7 +2658,7 @@ async function showAnyForm<K extends TableKey>(
   tableKey: K,
   record?: Partial<TableRecordMap[K]>
 ): Promise<void> {
-  if (!canWriteBusiness()) {
+  if (!canWriteTable(tableKey, !record)) {
     setMessage(getLocalizedText(structure.commonText.noEditPermission));
     return;
   }
@@ -2666,10 +2946,13 @@ loginForm.addEventListener('submit', async (event) => {
       return;
     }
 
-    const data = (await response.json()) as { user: AuthUser };
+    const data = (await response.json()) as {
+      user: AuthUser;
+      company_links: CompanyLink[];
+    };
 
     loginForm.reset();
-    showApp(data.user);
+    showApp(data.user, data.company_links);
   } catch (error) {
     showLogin(getLocalizedText(structure.commonText.loginError));
     console.error('Login error:', error);
@@ -2702,10 +2985,13 @@ passwordForm.addEventListener('submit', async (event) => {
       return;
     }
 
-    const data = (await response.json()) as { user: AuthUser };
+    const data = (await response.json()) as {
+      user: AuthUser;
+      company_links: CompanyLink[];
+    };
 
     passwordForm.reset();
-    showApp(data.user);
+    showApp(data.user, data.company_links);
   } catch (error) {
     passwordError.textContent =
       getLocalizedText(structure.commonText.passwordChangeError);
@@ -2727,6 +3013,7 @@ async function initialize(): Promise<void> {
   createTableNavButtons();
   syncUrlToState();
   applyLanguageToUI();
+  void renderAvailabilityControls(publicBookingSection, false);
 
   try {
     const response = await fetch(`${API_BASE}/auth/me`, {
@@ -2738,9 +3025,12 @@ async function initialize(): Promise<void> {
       return;
     }
 
-    const data = (await response.json()) as { user: AuthUser };
+    const data = (await response.json()) as {
+      user: AuthUser;
+      company_links: CompanyLink[];
+    };
 
-    showApp(data.user);
+    showApp(data.user, data.company_links);
   } catch (error) {
     showLogin();
     console.error('Session check failed:', error);

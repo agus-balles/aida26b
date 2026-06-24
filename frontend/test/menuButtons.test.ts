@@ -4,6 +4,7 @@ describe('Menu Pickers (Theme & Language)', () => {
   beforeEach(() => {
     document.body.innerHTML = `
       <section id="auth-section"></section>
+      <section id="public-booking-section"></section>
       <section id="password-section"></section>
       <form id="login-form"></form>
       <div id="login-error"></div>
@@ -24,11 +25,16 @@ describe('Menu Pickers (Theme & Language)', () => {
       </table>
     `;
 
-    global.fetch = vi.fn(() =>
-      Promise.resolve({
-        json: () => Promise.resolve([]),
-      })
-    ) as ReturnType<typeof vi.fn>;
+    global.fetch = vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes('/public/companies')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ data: [] }),
+        });
+      }
+
+      return Promise.resolve({ ok: false });
+    }) as ReturnType<typeof vi.fn>;
     vi.stubGlobal('alert', vi.fn());
   });
 

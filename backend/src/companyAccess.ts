@@ -13,27 +13,33 @@ type AuthedRequest = Request & { user?: AuthUser };
  * routes historically only checked the global role (admin/editor), so a user
  * explicitly tied to one company could still mutate another company's data.
  *
- * Model implemented here (additive, non-breaking):
- *  - Global admin manages everything.
- *  - A user WITHOUT any `auth.user_companies` link is a global business user
- *    (the existing editor behaviour) and keeps writing any company's data.
- *  - A user WITH one or more company links may only write company-scoped
- *    resources of the companies they belong to (with a write role), matching
- *    the spec: "Usuarios asociados a una empresa solo pueden operar sobre su
- *    empresa".
- *
- * Global catalogs (`sports`, `court_partition_rules`) are not company-scoped
- * and remain governed by the global role gate only.
+ * Strict model:
+ *  - Global admin manages every company and global catalog.
+ *  - Every non-admin needs an explicit `auth.user_companies` link to read or
+ *    write data belonging to a company.
+ *  - `owner`, `manager`, and `staff` may write; `viewer` may only read.
+ *  - Global catalogs (`sports`, `court_partition_rules`) are admin-managed.
  */
 
+export const COMPANY_ROLES = ['owner', 'manager', 'staff', 'viewer'] as const;
 export const COMPANY_WRITE_ROLES = ['owner', 'manager', 'staff'] as const;
+export const COMPANY_READ_ROLES = COMPANY_ROLES;
 
 export type CompanyLink = { company_id: number; role: string };
 
+export function isCompanyRole(value: unknown): value is (typeof COMPANY_ROLES)[number] {
+  return typeof value === 'string' && (COMPANY_ROLES as readonly string[]).includes(value);
+}
+
 export type CompanyScope =
-  | { kind: 'none' } // global catalog, no per-company scoping
-  | { kind: 'admin-only' } // only a global admin / unlinked user may write
+  | { kind: 'none' } // global catalog, only a global admin may write
+  | { kind: 'admin-only' } // only a global admin may write
   | { kind: 'company'; companyId: number };
+
+export type CompanyReadConstraint = {
+  condition: string;
+  values: number[];
+};
 
 /** Pure decision: does this user pass company scoping for the resolved scope? */
 export function decideCompanyScopeAccess(
@@ -43,9 +49,7 @@ export function decideCompanyScopeAccess(
 ): boolean {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  // Unlinked users keep the historical global-business-writer behaviour.
-  if (links.length === 0) return true;
-  if (scope.kind === 'none') return true;
+  if (scope.kind === 'none') return false;
   if (scope.kind === 'admin-only') return false;
   return links.some(
     (link) =>
@@ -85,7 +89,7 @@ export async function resolveCompanyScope(
       return { kind: 'none' };
 
     case 'companies': {
-      // Creating a brand-new company is a global-admin/global-editor action.
+      // Creating a brand-new company is an admin action.
       if (method === 'POST') return { kind: 'admin-only' };
       const companyId = numericParam(query.id);
       return companyId ? { kind: 'company', companyId } : { kind: 'admin-only' };
@@ -169,6 +173,47 @@ export async function fetchUserCompanyLinks(
   }));
 }
 
+export async function fetchReadableCompanyIds(
+  queryable: Queryable,
+  user: AuthUser
+): Promise<number[] | null> {
+  if (user.role === 'admin') return null;
+
+  const links = await fetchUserCompanyLinks(queryable, user.id);
+  return links
+    .filter((link) => (COMPANY_READ_ROLES as readonly string[]).includes(link.role))
+    .map((link) => link.company_id);
+}
+
+export function getCompanyReadConstraint(
+  tableName: string,
+  companyIds: number[] | null,
+  parameterIndex: number
+): CompanyReadConstraint | null {
+  if (companyIds === null) return null;
+
+  const parameter = `$${parameterIndex}::bigint[]`;
+
+  switch (tableName) {
+    case 'companies':
+      return { condition: `"id" = ANY(${parameter})`, values: companyIds };
+
+    case 'company_sports':
+    case 'company_time_blocks':
+    case 'courts':
+      return { condition: `"company_id" = ANY(${parameter})`, values: companyIds };
+
+    case 'court_prices':
+      return {
+        condition: `"court_id" IN (SELECT id FROM courts WHERE company_id = ANY(${parameter}))`,
+        values: companyIds,
+      };
+
+    default:
+      return null;
+  }
+}
+
 /**
  * Express guard for generic CRUD writes. Returns true when the write is
  * allowed; otherwise sends a 403/500 response and returns false.
@@ -181,14 +226,16 @@ export async function enforceCompanyScope(
 ): Promise<boolean> {
   const user = (req as AuthedRequest).user;
 
+  if (!user) {
+    res.status(403).json({ error: 'No tenés permisos para realizar esta acción.' });
+    return false;
+  }
+
   // Global admin manages every company without an extra lookup.
-  if (user?.role === 'admin') return true;
+  if (user.role === 'admin') return true;
 
   try {
-    const links = await fetchUserCompanyLinks(pool, user!.id);
-
-    // Unlinked global business users keep the historical behaviour.
-    if (links.length === 0) return true;
+    const links = await fetchUserCompanyLinks(pool, user.id);
 
     const scope = await resolveCompanyScope(
       pool,

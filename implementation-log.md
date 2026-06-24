@@ -275,3 +275,40 @@ COMO:
 - El backend valida la regla elegida dentro de la transaccion y mantiene los
   locks de reserva sobre todo el arbol, incluso cuando la regla cambia el
   deporte de una cancha hija.
+
+## 2026-06-24 - Permisos estrictos por empresa y reservas publicas
+
+QUE:
+- Se implemento el alcance estricto por empresa, la administracion de roles
+  usuario-empresa y el flujo publico de disponibilidad y holds.
+
+COMO:
+- `auth.user_companies` sigue separando identidad y pertenencia: el admin
+  global accede a todo; los demas usuarios solo ven y operan las empresas que
+  tienen asignadas. `owner`, `manager` y `staff` pueden operar; `viewer` solo
+  consulta. Los catalogos globales siguen siendo de administracion global.
+- El lector del CRUD generico ahora filtra empresas, deportes por empresa,
+  bloques horarios, canchas y precios segun los vinculos del usuario. Sin
+  vinculos, un no-admin no recibe datos empresariales.
+- Se agregaron endpoints publicos de empresas, deportes y bloques activos. La
+  disponibilidad y la creacion de holds no requieren sesion; un hold anonimo
+  queda sin usuario creador, vence a los diez minutos y espera confirmacion de
+  un operador.
+- El hold publico usa un limite simple en memoria de 10 intentos por IP cada 10
+  minutos, sin dependencias productivas. Confirmar y cancelar mantienen sesion,
+  contrasena actualizada y rol operativo para la empresa de la reserva.
+- Se agregaron los endpoints `GET /api/admin/users`,
+  `GET /api/admin/users/:id/companies`,
+  `POST /api/admin/users/:id/companies` y
+  `DELETE /api/admin/users/:id/companies/:companyId`. Validan IDs y roles de
+  empresa, actualizan `auth.user_companies` y auditan el cambio sin registrar
+  secretos.
+- Se agrego la pantalla `Permisos` dentro del shell existente. Solo el admin
+  global la ve; permite elegir usuario, empresa y rol, consultar vinculos y
+  quitarlos. Se reutilizan los patrones actuales de selects, formularios y
+  tablas.
+- La pantalla de ingreso incluye el mapa publico de reservas. Fuera de sesion
+  informa que la empresa debe confirmar el hold; dentro de sesion un operador
+  puede crear y confirmar el suyo. El backend conserva la validacion final.
+- `auth.md` se conserva localmente, se ignora en Git y deja de participar del
+  tracking.
