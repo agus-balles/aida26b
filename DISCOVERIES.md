@@ -381,8 +381,7 @@ that broke `test:db` is already removed — B3).
 
 ### F3 — User-company role administration
 
-- New admin-only routes (also requiring an active session and a changed
-  password):
+- New admin-only routes requiring an active session:
   - `GET /api/admin/users`
   - `GET /api/admin/users/:id/companies`
   - `POST /api/admin/users/:id/companies` with `{ company_id, role }`
@@ -391,6 +390,9 @@ that broke `test:db` is already removed — B3).
   update, inspect, and remove `owner`, `manager`, `staff`, and `viewer` links.
 - IDs and roles are validated before persistence; successful changes are
   audited without recording credentials, session material, salts, or hashes.
+- The same screen creates mandatory `Usuario` (`reader`) and `Empresa`
+  (`editor`) accounts. It validates username, unique email, and a 12-character
+  password with upper-case, lower-case, and numeric characters before hashing.
 
 ### F4 — Public booking screen and local auth documentation
 
@@ -402,3 +404,26 @@ that broke `test:db` is already removed — B3).
   backend remains the final authorization authority for confirmation/cancel.
 - `auth.md` is retained as local documentation and ignored by Git, so it no
   longer participates in the shared change set.
+
+### F5 — Partitions are an explicit, one-level operation
+
+- Automatic partitioning applies only to the court selected by the operator.
+  Its generated children always begin non-partitionable, even when a later
+  rule exists for their format.
+- Editing a child is intentionally separate from generating descendants: the
+  operator saves the `Particionable` change first, then selects **Aplicar regla
+  de partición** from that saved court. This makes an irreversible physical
+  layout change visible and reviewable before it occurs.
+- The database continues to hold internal geometry, root and parent references,
+  and rule-selection fields. The UI uses their relationships to render a court
+  tree but does not expose technical identifiers, raw booleans or geometry as
+  routine inputs.
+
+### F6 — Password changes are voluntary within an authenticated session
+
+- `auth.users.must_change_password` remains for compatibility, but the active
+  product policy is `false`: new and reset users can access the application
+  immediately.
+- Password changes remain authenticated and require the current password. The
+  UI exposes that action in the signed-in user menu rather than introducing an
+  unauthenticated reset endpoint.

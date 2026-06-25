@@ -312,3 +312,72 @@ COMO:
   puede crear y confirmar el suyo. El backend conserva la validacion final.
 - `auth.md` se conserva localmente, se ignora en Git y deja de participar del
   tracking.
+
+## 2026-06-24 - Alta de usuarios desde administración
+
+QUE:
+- Se incorporó el alta de usuarios dentro de la pantalla de administración.
+
+COMO:
+- El panel `Permisos` ahora incluye los campos obligatorios de nombre de
+  usuario, email, contraseña y rol. El desplegable presenta `Usuario` y
+  `Empresa`, que se persisten respectivamente como los roles internos `reader`
+  y `editor` ya existentes.
+- El alta exige usuario de 3 a 80 caracteres con un conjunto seguro de
+  caracteres, email válido y único, y contraseña de al menos 12 caracteres con
+  mayúscula, minúscula y número. La misma política se aplica a cambios y
+  reseteos de contraseña.
+- Los usuarios nuevos pueden iniciar sesión y operar de inmediato. Los usuarios
+  de tipo `Empresa` se asignan luego a una empresa mediante el formulario de
+  vínculos existente.
+- El backend valida los datos de forma autoritativa y devuelve errores
+  declarativos para usuario, email, contraseña, rol y duplicados, sin registrar
+  secretos en auditoría o logs.
+
+## 2026-06-24 - Operación declarativa de canchas y particiones explícitas
+
+QUE:
+- Se simplificó la operación de canchas, se ocultaron datos internos y se
+  eliminó la partición automática recursiva.
+
+COMO:
+- El listado de canchas ahora es jerárquico: identifica la cancha principal o
+  su padre, muestra cuántas subcanchas tiene y deja expandir el árbol. Las
+  coordenadas de layout, los IDs internos y el ratio de área útil siguen en la
+  base, pero no se muestran en la operación cotidiana.
+- Una cancha creada con regla genera únicamente hijas directas, todas con
+  `is_partitionable = false`. Guardar una edición, incluso al marcar una hija
+  como particionable, no crea nuevas canchas.
+- Se agregó `POST /api/companies/:companyId/courts/:courtId/partition`. Es el
+  único flujo para crear subcanchas sobre una cancha existente; requiere una
+  regla explícita, permiso operativo, que la cancha esté marcada como
+  particionable y que aún no tenga hijas. La operación completa queda dentro
+  de una transacción.
+- La prioridad de reglas se presenta como Baja, Media y Alta, mapeadas a 1, 2
+  y 3. `usable_area_ratio` se conserva para la selección interna de reglas,
+  sin pedirlo en formularios.
+- La navegación ya no expone "Deportes por Empresa" como tabla separada. La
+  asociación se administra desde el formulario de Empresa, con nombres de
+  deportes y sin IDs visibles.
+- Los filtros técnicos se reemplazaron por búsqueda contextual. El backend
+  aplica esa búsqueda de forma segura sobre los campos declarados en el SSOT,
+  incluidas etiquetas de claves foráneas. Los selectores de empresa usan una
+  búsqueda remota, por lo que una empresa fuera de la primera página puede
+  encontrarse y elegirse sin mostrar su ID.
+
+## 2026-06-24 - Cambio voluntario de contraseña
+
+QUE:
+- El cambio de contraseña deja de ser obligatorio en el primer inicio de
+  sesión y pasa a ser una acción voluntaria del usuario autenticado.
+
+COMO:
+- El menú de sesión incorpora "Cambiar contraseña" junto a "Salir". Reutiliza
+  el formulario y el endpoint existentes, que siguen exigiendo la contraseña
+  actual y la política de contraseña segura.
+- Se retiró el middleware que bloqueaba operaciones por
+  `must_change_password`. Una migración define el valor por defecto en `false`
+  y normaliza las marcas históricas, para que la base y el backend compartan
+  la misma política.
+- El alta y el reseteo administrativo generan credenciales utilizables de
+  inmediato. La identidad, el hash con `scrypt` y la sesión opaca no cambian.

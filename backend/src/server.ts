@@ -9,6 +9,7 @@ import fs from 'fs';
 import * as auth from './auth';
 import {
   cancelBooking,
+  applyCourtPartitionRule,
   confirmBooking,
   createCourtWithPartitions,
   getCompanyAvailability,
@@ -52,7 +53,30 @@ function getSessionToken(req: Request) {
 }
 
 function readPassword(value: unknown) {
-  return typeof value === 'string' && value.length >= 8 ? value : null;
+  if (typeof value !== 'string') return null;
+
+  return value.length >= 12 &&
+    /[a-z]/.test(value) &&
+    /[A-Z]/.test(value) &&
+    /\d/.test(value)
+    ? value
+    : null;
+}
+
+function readUsername(value: unknown) {
+  const username = typeof value === 'string' ? value.trim() : '';
+  return /^[A-Za-z0-9._-]{3,80}$/.test(username) ? username : null;
+}
+
+function readEmail(value: unknown) {
+  const email = typeof value === 'string' ? value.trim() : '';
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 255
+    ? email
+    : null;
+}
+
+function isCreatableUserRole(value: unknown): value is 'reader' | 'editor' {
+  return value === 'reader' || value === 'editor';
 }
 
 function isUniqueViolation(error: unknown) {
@@ -129,14 +153,6 @@ const requireAuth: RequestHandler = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-};
-
-const requirePasswordReady: RequestHandler = (req, res, next) => {
-  if ((req as AuthedRequest).user?.must_change_password) {
-    return res.status(403).json({ error: 'Password change required' });
-  }
-
-  next();
 };
 
 const requireAdmin: RequestHandler = async (req, res, next) => {
@@ -378,33 +394,41 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
 app.post(
   '/api/admin/users',
   requireAuth,
-  requirePasswordReady,
   requireAdmin,
   async (req, res) => {
     try {
-      const username =
-        typeof req.body.username === 'string' ? req.body.username.trim() : '';
-
-      const email =
-        typeof req.body.email === 'string' && req.body.email.trim()
-          ? req.body.email.trim()
-          : null;
+      const username = readUsername(req.body.username);
+      const email = readEmail(req.body.email);
 
       const password = readPassword(req.body.password);
       const role = req.body.role;
 
-      if (!username || !password || !auth.isRole(role)) {
+      if (!username) {
         return res.status(400).json({
-          error: 'Valid username, password and role are required',
+          error: 'El nombre de usuario debe tener entre 3 y 80 caracteres y usar solo letras, números, puntos, guiones o guiones bajos.',
         });
+      }
+
+      if (!email) {
+        return res.status(400).json({ error: 'Ingresá un email válido.' });
+      }
+
+      if (!password) {
+        return res.status(400).json({
+          error: 'La contraseña debe tener al menos 12 caracteres e incluir mayúscula, minúscula y número.',
+        });
+      }
+
+      if (!isCreatableUserRole(role)) {
+        return res.status(400).json({ error: 'Seleccioná Usuario o Empresa como rol.' });
       }
 
       const { passwordHash, passwordSalt } = await auth.hashPassword(password);
 
       const result = await pool.query(
         `INSERT INTO auth.users
-         (username, email, password_hash, password_salt, role)
-         VALUES ($1, $2, $3, $4, $5)
+         (username, email, password_hash, password_salt, role, must_change_password)
+         VALUES ($1, $2, $3, $4, $5, false)
          RETURNING id, username, email, role, is_active, must_change_password`,
         [username, email, passwordHash, passwordSalt, role]
       );
@@ -417,7 +441,12 @@ app.post(
       return res.status(201).json(result.rows[0]);
     } catch (error) {
       if (isUniqueViolation(error)) {
-        return res.status(409).json({ error: 'Username already exists' });
+        const constraint = (error as { constraint?: string }).constraint;
+        return res.status(409).json({
+          error: constraint === 'users_email_unique'
+            ? 'El email ya está registrado.'
+            : 'El nombre de usuario ya está registrado.',
+        });
       }
 
       console.error('Error creating user:', error);
@@ -429,7 +458,6 @@ app.post(
 app.post(
   '/api/admin/users/:id/reset-password',
   requireAuth,
-  requirePasswordReady,
   requireAdmin,
   async (req, res) => {
     try {
@@ -449,7 +477,7 @@ app.post(
          SET
            password_hash = $1,
            password_salt = $2,
-           must_change_password = true,
+           must_change_password = false,
            updated_at = now()
          WHERE id = $3
          RETURNING id, username, email, role, is_active, must_change_password`,
@@ -475,7 +503,6 @@ app.post(
 app.get(
   '/api/admin/users',
   requireAuth,
-  requirePasswordReady,
   requireAdmin,
   async (_req, res) => {
     try {
@@ -495,7 +522,6 @@ app.get(
 app.get(
   '/api/admin/users/:id/companies',
   requireAuth,
-  requirePasswordReady,
   requireAdmin,
   async (req, res) => {
     const userId = readPublicId(req.params.id);
@@ -524,7 +550,6 @@ app.get(
 app.post(
   '/api/admin/users/:id/companies',
   requireAuth,
-  requirePasswordReady,
   requireAdmin,
   async (req, res) => {
     const userId = readPublicId(req.params.id);
@@ -569,7 +594,6 @@ app.post(
 app.delete(
   '/api/admin/users/:id/companies/:companyId',
   requireAuth,
-  requirePasswordReady,
   requireAdmin,
   async (req, res) => {
     const userId = readPublicId(req.params.id);
@@ -672,8 +696,13 @@ app.get('/api/public/companies/:companyId/time-blocks', async (req, res) => {
 app.post(
   '/api/companies/:companyId/courts',
   requireAuth,
-  requirePasswordReady,
   createCourtWithPartitions(pool)
+);
+
+app.post(
+  '/api/companies/:companyId/courts/:courtId/partition',
+  requireAuth,
+  applyCourtPartitionRule(pool)
 );
 
 app.get(
@@ -690,19 +719,17 @@ app.post(
 app.post(
   '/api/bookings/:id/confirm',
   requireAuth,
-  requirePasswordReady,
   confirmBooking(pool)
 );
 
 app.post(
   '/api/bookings/:id/cancel',
   requireAuth,
-  requirePasswordReady,
   cancelBooking(pool)
 );
 
 // Generic business API routes
-app.get('/api/:tableName', requireAuth, requirePasswordReady, async (req, res) => {
+app.get('/api/:tableName', requireAuth, async (req, res) => {
   try {
     const readableCompanyIds = await fetchReadableCompanyIds(
       pool,
@@ -718,7 +745,6 @@ app.get('/api/:tableName', requireAuth, requirePasswordReady, async (req, res) =
 app.post(
   '/api/:tableName',
   requireAuth,
-  requirePasswordReady,
   async (req, res) => {
     if (req.params.tableName === 'courts') {
       return res.status(405).json({
@@ -737,7 +763,6 @@ app.post(
 app.put(
   '/api/:tableName',
   requireAuth,
-  requirePasswordReady,
   async (req, res) => {
     if (!(await enforceScopedBusinessWrite(req, res, req.params.tableName))) {
       return;
@@ -750,7 +775,6 @@ app.put(
 app.delete(
   '/api/:tableName',
   requireAuth,
-  requirePasswordReady,
   async (req, res) => {
     if (!(await enforceScopedBusinessWrite(req, res, req.params.tableName))) {
       return;

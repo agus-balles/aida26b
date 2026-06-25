@@ -38,7 +38,7 @@ export type CompanyScope =
 
 export type CompanyReadConstraint = {
   condition: string;
-  values: number[];
+  values: number[][];
 };
 
 /** Pure decision: does this user pass company scoping for the resolved scope? */
@@ -196,17 +196,17 @@ export function getCompanyReadConstraint(
 
   switch (tableName) {
     case 'companies':
-      return { condition: `"id" = ANY(${parameter})`, values: companyIds };
+      return { condition: `"id" = ANY(${parameter})`, values: [companyIds] };
 
     case 'company_sports':
     case 'company_time_blocks':
     case 'courts':
-      return { condition: `"company_id" = ANY(${parameter})`, values: companyIds };
+      return { condition: `"company_id" = ANY(${parameter})`, values: [companyIds] };
 
     case 'court_prices':
       return {
         condition: `"court_id" IN (SELECT id FROM courts WHERE company_id = ANY(${parameter}))`,
-        values: companyIds,
+        values: [companyIds],
       };
 
     default:

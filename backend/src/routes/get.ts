@@ -65,7 +65,7 @@ export function buildListQuery(
   query: express.Request["query"],
   filterConfig: Record<string, ColumnDef>,
   defaultSort: string | string[],
-  readConstraint?: { condition: string; values: number[] } | null
+  readConstraint?: { condition: string; values: number[][] } | null
 ) {
   const conditions: string[] = [];
   const values: unknown[] = [...(readConstraint?.values ?? [])];
@@ -183,6 +183,51 @@ export function buildListQuery(
     }
   }
 
+  const searchValue = Array.isArray(query.search) ? query.search[0] : query.search;
+
+  if (typeof searchValue === "string" && searchValue.trim()) {
+    const term = `%${searchValue.trim()}%`;
+    const searchableColumns = Object.entries(filterConfig).filter(
+      ([, config]) => config.searchable
+    );
+    const searchConditions: string[] = [];
+
+    for (const [fieldName, config] of searchableColumns) {
+      if (config.foreignKey) {
+        const { table, valueField, labelField } = config.foreignKey;
+        searchConditions.push(
+          `EXISTS (SELECT 1 FROM ${table} search_reference WHERE search_reference."${valueField}" = base."${fieldName}" AND search_reference."${labelField}"::text ILIKE $${paramIndex})`
+        );
+        values.push(term);
+        paramIndex++;
+        continue;
+      }
+
+      if (config.type === "boolean") {
+        const normalized = searchValue.trim().toLocaleLowerCase();
+        const positive = ["si", "sí", "activo", "activa", "true", "yes"];
+        const negative = ["no", "inactivo", "inactiva", "false"];
+
+        if (positive.includes(normalized) || negative.includes(normalized)) {
+          searchConditions.push(`base."${fieldName}" = $${paramIndex}`);
+          values.push(positive.includes(normalized));
+          paramIndex++;
+        }
+        continue;
+      }
+
+      if (config.type === "string" || config.options) {
+        searchConditions.push(`base."${fieldName}"::text ILIKE $${paramIndex}`);
+        values.push(term);
+        paramIndex++;
+      }
+    }
+
+    if (searchConditions.length > 0) {
+      conditions.push(`(${searchConditions.join(" OR ")})`);
+    }
+  }
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -272,6 +317,7 @@ function isListRequest(query: express.Request["query"]): boolean {
       key === "page" ||
       key === "sort" ||
       key === "dir" ||
+      key === "search" ||
       key.startsWith("filter_")
   );
 }

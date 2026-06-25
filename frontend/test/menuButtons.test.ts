@@ -12,6 +12,8 @@ describe('Menu Pickers (Theme & Language)', () => {
       <div id="password-error"></div>
       <div id="app-shell"></div>
       <span id="current-user"></span>
+      <button id="home-btn"></button>
+      <button id="change-password-btn"></button>
       <button id="logout-btn"></button>
       <div id="status-message"></div>
       <div id="menu-nav"></div>
@@ -160,5 +162,31 @@ describe('Menu Pickers (Theme & Language)', () => {
       expect(consoleSpy).toHaveBeenCalled();
       consoleSpy.mockRestore();
     });
+  });
+
+  test('home button returns from password change to the initial screen', async () => {
+    vi.resetModules();
+    await import('../src/app');
+
+    const passwordSection = document.getElementById('password-section') as HTMLElement;
+    const authSection = document.getElementById('auth-section') as HTMLElement;
+    const publicBooking = document.getElementById('public-booking-section') as HTMLElement;
+
+    passwordSection.style.display = 'block';
+    authSection.style.display = 'none';
+    publicBooking.style.display = 'none';
+
+    document.getElementById('home-btn')?.dispatchEvent(new Event('click'));
+
+    expect(passwordSection.style.display).toBe('none');
+    expect(authSection.style.display).toBe('block');
+    expect(publicBooking.style.display).toBe('block');
+  });
+
+  test('session navigation exposes the voluntary password change control', async () => {
+    vi.resetModules();
+    await import('../src/app');
+
+    expect(document.getElementById('change-password-btn')).toBeTruthy();
   });
 });

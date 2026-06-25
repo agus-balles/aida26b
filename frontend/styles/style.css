@@ -126,6 +126,24 @@ textarea:focus-visible {
     padding: 0 28px;
 }
 
+.brand-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.home-btn {
+    margin-left: auto;
+    border-color: transparent;
+    background: transparent;
+    color: var(--primary);
+}
+
+.home-btn:hover:not(:disabled) {
+    border-color: var(--primary-soft);
+    background: var(--primary-soft);
+}
+
 .brand-mark {
     position: relative;
     width: 32px;
@@ -192,7 +210,8 @@ h3 {
 #record-form form,
 .booking-form,
 .availability-controls,
-.company-permissions-form {
+.company-permissions-form,
+.admin-user-form {
     margin: 0;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -334,6 +353,12 @@ textarea.invalid:focus-visible {
     white-space: nowrap;
 }
 
+.top-bar-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.change-password-btn,
 .logout-btn,
 .cancel-btn {
     border-color: var(--border-strong);
@@ -557,6 +582,75 @@ tbody tr:last-child td {
     width: 100%;
 }
 
+.context-search {
+    display: grid;
+    max-width: 520px;
+    gap: 6px;
+}
+
+.context-search input,
+.company-select-search {
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+}
+
+.company-select-group {
+    display: grid;
+    gap: 8px;
+}
+
+.court-name-cell {
+    font-weight: 650;
+}
+
+.court-tree-toggle {
+    min-width: 26px;
+    min-height: 26px;
+    margin-right: 8px;
+    padding: 2px 6px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--primary);
+}
+
+.court-tree-toggle:hover:not(:disabled) {
+    background: var(--primary-soft);
+}
+
+.company-sports-manager {
+    display: flex;
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    margin: 8px 0 0;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.company-sports-manager legend {
+    padding: 0 4px;
+    color: var(--text);
+    font-weight: 700;
+}
+
+.company-sport-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text);
+}
+
+.field-hint {
+    display: block;
+    margin-top: 6px;
+    color: var(--text-muted);
+}
+
 .filter-row {
     display: flex;
     min-width: min(100%, 560px);
@@ -613,7 +707,8 @@ tbody tr:last-child td {
 }
 
 .availability-controls,
-.company-permissions-form {
+.company-permissions-form,
+.admin-user-form {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 16px;
@@ -623,12 +718,42 @@ tbody tr:last-child td {
 }
 
 .availability-controls .form-group,
-.company-permissions-form .form-group {
+.company-permissions-form .form-group,
+.admin-user-form .form-group {
     margin: 0;
 }
 
+.admin-user-form > h3,
+.admin-user-feedback {
+    grid-column: 1 / -1;
+}
+
+.admin-user-feedback {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-muted);
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 620;
+}
+
+.admin-user-feedback[data-status="success"] {
+    border-color: #9ccfc6;
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.admin-user-feedback[data-status="error"] {
+    border-color: var(--danger-soft);
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
 .availability-controls button,
-.company-permissions-form button {
+.company-permissions-form button,
+.admin-user-form button {
     width: 100%;
 }
 
@@ -884,7 +1009,13 @@ p.successOutputInfo {
         padding: 14px;
     }
 
-    .top-bar .logout-btn {
+    .top-bar-actions {
+        width: 100%;
+    }
+
+    .top-bar .logout-btn,
+    .top-bar .change-password-btn {
+        flex: 1 1 0;
         width: 100%;
     }
 
@@ -921,6 +1052,7 @@ p.successOutputInfo {
 
     .availability-controls,
     .company-permissions-form,
+    .admin-user-form,
     .availability-output {
         grid-template-columns: 1fr;
     }

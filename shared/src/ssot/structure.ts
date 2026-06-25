@@ -59,6 +59,7 @@ export const structure = {
           type: 'number',
           label: { es: 'ID', en: 'ID' },
           editable: false,
+          visible: false,
         },
 
         name: {
@@ -67,6 +68,7 @@ export const structure = {
           validator: {
             required: true,
           },
+          searchable: true,
         },
 
         email: {
@@ -103,6 +105,7 @@ export const structure = {
           validator: {
             nullable: true,
           },
+          searchable: true,
         },
 
         timezone: {
@@ -118,6 +121,7 @@ export const structure = {
           type: 'boolean',
           label: { es: 'Activa', en: 'Active' },
           editable: false,
+          searchable: true,
         },
       },
       pk: 'id',
@@ -132,6 +136,7 @@ export const structure = {
           type: 'number',
           label: { es: 'ID', en: 'ID' },
           editable: false,
+          visible: false,
         },
 
         name: {
@@ -140,6 +145,7 @@ export const structure = {
           validator: {
             required: true,
           },
+          searchable: true,
         },
 
         slug: {
@@ -150,12 +156,14 @@ export const structure = {
             pattern: '^[a-z0-9_]+$',
             patternMessage: 'must contain lowercase letters, numbers or underscores',
           },
+          searchable: true,
         },
 
         is_active: {
           type: 'boolean',
           label: { es: 'Activo', en: 'Active' },
           editable: false,
+          searchable: true,
         },
       },
       pk: 'id',
@@ -204,6 +212,7 @@ export const structure = {
       uiName: { es: 'Deporte de Empresa', en: 'Company Sport' },
       title: { es: 'Deportes por Empresa', en: 'Company Sports' },
       addButtonLabel: { es: 'Agregar Deporte a Empresa', en: 'Add Company Sport' },
+      showInNavigation: false,
     } satisfies TableStructure,
 
     courts: {
@@ -212,6 +221,7 @@ export const structure = {
           type: 'number',
           label: { es: 'ID', en: 'ID' },
           editable: false,
+          visible: false,
         },
 
         company_id: {
@@ -228,18 +238,21 @@ export const structure = {
             valueField: 'id',
             labelField: 'name',
           },
+          searchable: true,
         },
 
         parent_court_id: {
           type: 'number',
           label: { es: 'Cancha Padre', en: 'Parent Court' },
           editable: false,
+          visible: false,
         },
 
         root_court_id: {
           type: 'number',
           label: { es: 'Cancha Raíz', en: 'Root Court' },
           editable: false,
+          visible: false,
         },
 
         name: {
@@ -248,6 +261,7 @@ export const structure = {
           validator: {
             required: true,
           },
+          searchable: true,
         },
 
         sport_id: {
@@ -264,6 +278,7 @@ export const structure = {
             valueField: 'id',
             labelField: 'name',
           },
+          searchable: true,
         },
 
         format: {
@@ -287,6 +302,7 @@ export const structure = {
             { value: 'volleyball', label: { es: 'Vóley', en: 'Volleyball' } },
             { value: 'volleyball_training', label: { es: 'Zona de entrenamiento de vóley', en: 'Volleyball training area' } },
           ],
+          searchable: true,
         },
 
         is_partitionable: {
@@ -301,42 +317,49 @@ export const structure = {
             { value: 'true', label: { es: 'Sí', en: 'Yes' } },
             { value: 'false', label: { es: 'No', en: 'No' } },
           ],
+          searchable: true,
         },
 
         is_auto_generated: {
           type: 'boolean',
           label: { es: 'Autogenerada', en: 'Auto-generated' },
           editable: false,
+          visible: false,
         },
 
         layout_x: {
           type: 'number',
           label: { es: 'X', en: 'X' },
           editable: false,
+          visible: false,
         },
 
         layout_y: {
           type: 'number',
           label: { es: 'Y', en: 'Y' },
           editable: false,
+          visible: false,
         },
 
         layout_width: {
           type: 'number',
           label: { es: 'Ancho', en: 'Width' },
           editable: false,
+          visible: false,
         },
 
         layout_height: {
           type: 'number',
           label: { es: 'Alto', en: 'Height' },
           editable: false,
+          visible: false,
         },
 
         is_active: {
           type: 'boolean',
           label: { es: 'Activa', en: 'Active' },
           editable: false,
+          searchable: true,
         },
       },
       pk: 'id',
@@ -351,6 +374,7 @@ export const structure = {
           type: 'number',
           label: { es: 'ID', en: 'ID' },
           editable: false,
+          visible: false,
         },
 
         source_format: {
@@ -411,23 +435,22 @@ export const structure = {
         usable_area_ratio: {
           type: 'number',
           label: { es: 'Área útil', en: 'Usable Area' },
-          input: 'number',
-          defaultValue: 1,
-          validator: {
-            required: true,
-            minValue: 0.01,
-            maxValue: 1,
-          },
+          editable: false,
+          visible: false,
         },
 
         priority: {
-          type: 'number',
+          type: 'string',
           label: { es: 'Prioridad', en: 'Priority' },
-          input: 'number',
-          defaultValue: 0,
+          input: 'select',
+          defaultValue: '2',
+          options: [
+            { value: '1', label: { es: 'Baja', en: 'Low' } },
+            { value: '2', label: { es: 'Media', en: 'Medium' } },
+            { value: '3', label: { es: 'Alta', en: 'High' } },
+          ],
           validator: {
             required: true,
-            integer: true,
           },
         },
 
@@ -449,6 +472,7 @@ export const structure = {
           type: 'number',
           label: { es: 'ID', en: 'ID' },
           editable: false,
+          visible: false,
         },
 
         court_id: {
@@ -540,6 +564,7 @@ export const structure = {
           type: 'number',
           label: { es: 'ID', en: 'ID' },
           editable: false,
+          visible: false,
         },
 
         company_id: {
@@ -644,6 +669,7 @@ export const structure = {
     cancel: { es: 'Cancelar', en: 'Cancel' },
     delete: { es: 'Eliminar', en: 'Delete' },
     edit: { es: 'Editar', en: 'Edit' },
+    home: { es: 'Inicio', en: 'Home' },
     update: { es: 'Actualizar', en: 'Update' },
     login: { es: 'Ingresar', en: 'Login' },
     password: { es: 'Contraseña', en: 'Password' },
@@ -670,6 +696,11 @@ export const structure = {
       en: 'Your request is on hold. The company must confirm it before it expires.',
     },
     companyPermissions: { es: 'Permisos', en: 'Permissions' },
+    createUser: { es: 'Crear usuario', en: 'Create user' },
+    userRole: { es: 'Rol', en: 'Role' },
+    userAccount: { es: 'Usuario', en: 'User' },
+    companyAccount: { es: 'Empresa', en: 'Company' },
+    userCreated: { es: 'Usuario creado', en: 'User created' },
     user: { es: 'Usuario', en: 'User' },
     companyRole: { es: 'Rol en empresa', en: 'Company role' },
     savePermission: { es: 'Guardar permiso', en: 'Save permission' },

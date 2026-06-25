@@ -78,13 +78,13 @@ test('resolveCompanyScope resolves company via court for court_prices', async ()
 test('company-scoped reads add an ownership condition', () => {
   assert.deepEqual(
     getCompanyReadConstraint('courts', [1, 4], 1),
-    { condition: '"company_id" = ANY($1::bigint[])', values: [1, 4] }
+    { condition: '"company_id" = ANY($1::bigint[])', values: [[1, 4]] }
   );
   assert.deepEqual(
     getCompanyReadConstraint('court_prices', [4], 2),
     {
       condition: '"court_id" IN (SELECT id FROM courts WHERE company_id = ANY($2::bigint[]))',
-      values: [4],
+      values: [[4]],
     }
   );
 });

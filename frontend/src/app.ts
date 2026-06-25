@@ -120,7 +120,9 @@ const passwordError = document.getElementById('password-error') as HTMLElement;
 const publicBookingSection = document.getElementById('public-booking-section') as HTMLElement;
 
 const currentUserEl = document.getElementById('current-user') as HTMLElement;
+const changePasswordBtn = document.getElementById('change-password-btn') as HTMLButtonElement;
 const logoutBtn = document.getElementById('logout-btn') as HTMLButtonElement;
+const homeBtn = document.getElementById('home-btn') as HTMLButtonElement;
 const statusMessage = document.getElementById('status-message') as HTMLElement;
 
 const viewTitle = document.getElementById('view-title') as HTMLElement;
@@ -210,12 +212,24 @@ function showPasswordChange(user: AuthUser, companyLinks: CompanyLink[]): void {
   passwordError.hidden = true;
 }
 
-function showApp(user: AuthUser, companyLinks: CompanyLink[] = []): void {
-  if (user.must_change_password) {
-    showPasswordChange(user, companyLinks);
+function goHome(): void {
+  hideAnyForm();
+
+  if (passwordSection.style.display !== 'none') {
+    showLogin();
     return;
   }
 
+  if (currentUser) {
+    activeTableKey = tableKeys[0];
+    showSection(activeTableKey);
+    return;
+  }
+
+  showLogin();
+}
+
+function showApp(user: AuthUser, companyLinks: CompanyLink[] = []): void {
   currentUser = user;
   currentCompanyLinks = companyLinks;
 
@@ -501,6 +515,7 @@ type TableState = {
   page: number;
   sort?: string;
   dir?: 'asc' | 'desc';
+  search?: string;
   filters: Record<string, FilterEntry[]>;
 };
 
@@ -536,6 +551,10 @@ function syncStateToUrl(): void {
     params.set('dir', currentState.dir || 'asc');
   }
 
+  if (currentState.search) {
+    params.set('search', currentState.search);
+  }
+
   for (const [fieldName, entries] of Object.entries(currentState.filters)) {
     for (const entry of entries) {
       const value = serializeFilterValue(fieldName, entry);
@@ -560,6 +579,7 @@ function syncUrlToState(): void {
   currentState.page = Math.max(1, parseInt(params.get('page') || '1', 10) || 1);
   currentState.sort = params.get('sort') || undefined;
   currentState.dir = (params.get('dir') as 'asc' | 'desc' | null) || undefined;
+  currentState.search = params.get('search') || undefined;
   currentState.filters = {};
 
   params.forEach((value, key) => {
@@ -612,7 +632,9 @@ function applyStaticLanguageToUI(): void {
   setLocalizedElementText('current-password-label', structure.commonText.currentPassword);
   setLocalizedElementText('new-password-label', structure.commonText.newPassword);
   setLocalizedElementText('password-submit-btn', structure.commonText.update);
+  setLocalizedElementText('change-password-btn', structure.commonText.changePassword);
   setLocalizedElementText('logout-btn', structure.commonText.logout);
+  setLocalizedElementText('home-btn', structure.commonText.home);
 }
 
 function updateNavButtonsText(): void {
@@ -640,6 +662,9 @@ function createTableNavButtons(): void {
 
   for (const key of tableKeys) {
     const config = structure.tables[key];
+
+    if ((config as TableStructure).showInNavigation === false) continue;
+
     const button = document.createElement('button');
 
     button.id = `${key}-btn`;
@@ -671,18 +696,6 @@ function resetStateForTable(tableKey: TableKey): void {
     page: 1,
     filters: {},
   };
-
-  const config = structure.tables[tableKey];
-  const pkField = Array.isArray(config.pk) ? config.pk[0] : config.pk;
-  const pkColumn = (config.columns as Record<string, ColumnDef>)[pkField];
-
-  if (!pkColumn) return;
-
-  currentState.filters[pkField] = [
-    pkColumn.type === 'number'
-      ? { negated: false, min: '', max: '' }
-      : { negated: false, value: '' },
-  ];
 }
 
 function showSection(section: TableKey, pushState = true): void {
@@ -726,7 +739,7 @@ function showSection(section: TableKey, pushState = true): void {
 window.addEventListener('popstate', () => {
   syncUrlToState();
 
-  if (currentUser && !currentUser.must_change_password) {
+  if (currentUser) {
     showSection(activeTableKey, false);
   }
 });
@@ -793,7 +806,7 @@ function applyLanguageToUI(): void {
   updateNavButtonsText();
   showMenu();
 
-  if (currentUser && !currentUser.must_change_password) {
+  if (currentUser) {
     if (activeCustomView === 'availability') {
       showAvailabilityView();
     } else if (activeCustomView === 'permissions') {
@@ -861,6 +874,138 @@ function describePartitionLayout(value: unknown): string {
   return count > 0 ? `${count} subcanchas` : 'Distribución no disponible';
 }
 
+function formatDisplayValue(value: unknown): string {
+  if (value === true || value === 'true') return getLocalizedText({ es: 'Sí', en: 'Yes' });
+  if (value === false || value === 'false') return getLocalizedText({ es: 'No', en: 'No' });
+  return String(value ?? '');
+}
+
+function isAffirmative(value: unknown): boolean {
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function renderCourtsTable(
+  records: TableRecordMap['courts'][],
+  foreignKeyLabels: Map<string, Map<string, string>>
+): void {
+  const thead = sharedTable.querySelector('thead')!;
+  const tbody = sharedTable.querySelector('tbody')!;
+  const showActions = canWriteTable('courts');
+  const childrenByParent = new Map<string, TableRecordMap['courts'][]>();
+  const recordsById = new Map<string, TableRecordMap['courts']>();
+
+  records.forEach((record) => {
+    recordsById.set(String(record.id), record);
+    if (record.parent_court_id != null) {
+      const parentKey = String(record.parent_court_id);
+      childrenByParent.set(parentKey, [...(childrenByParent.get(parentKey) ?? []), record]);
+    }
+  });
+
+  thead.innerHTML = '';
+  tbody.innerHTML = '';
+
+  const headerRow = document.createElement('tr');
+  ['Cancha', 'Empresa', 'Deporte', 'Formato', 'Estado', 'Subcanchas'].forEach((label) => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    headerRow.appendChild(th);
+  });
+  if (showActions) {
+    const th = document.createElement('th');
+    th.textContent = getLocalizedText(structure.commonText.actions);
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+
+  const expandedRoots = new Set<string>();
+  const rootRecords = records.filter((record) => record.parent_court_id == null);
+
+  const appendCourt = (record: TableRecordMap['courts'], depth: number, rootId: string) => {
+    const children = childrenByParent.get(String(record.id)) ?? [];
+    const row = document.createElement('tr');
+    row.dataset.rootCourtId = rootId;
+    row.dataset.courtDepth = String(depth);
+    if (depth > 0 && !expandedRoots.has(rootId)) row.hidden = true;
+
+    const courtCell = document.createElement('td');
+    courtCell.className = 'court-name-cell';
+    courtCell.style.paddingInlineStart = `${16 + depth * 26}px`;
+    if (children.length > 0) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'court-tree-toggle';
+      toggle.textContent = '▸';
+      toggle.setAttribute('aria-label', `Mostrar subcanchas de ${String(record.name)}`);
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.addEventListener('click', () => {
+        const expanded = !expandedRoots.has(rootId);
+        if (expanded) expandedRoots.add(rootId);
+        else expandedRoots.delete(rootId);
+        tbody.querySelectorAll<HTMLTableRowElement>(`tr[data-root-court-id="${rootId}"]`).forEach((candidate) => {
+          const candidateDepth = Number(candidate.dataset.courtDepth ?? '0');
+          candidate.hidden = candidateDepth > 0 && !expanded;
+        });
+        toggle.textContent = expanded ? '▾' : '▸';
+        toggle.setAttribute('aria-expanded', String(expanded));
+      });
+      courtCell.appendChild(toggle);
+    }
+    const name = document.createElement('span');
+    name.textContent = String(record.name);
+    courtCell.appendChild(name);
+    row.appendChild(courtCell);
+
+    const companyCell = document.createElement('td');
+    companyCell.textContent = foreignKeyLabels.get('company_id')?.get(String(record.company_id)) ?? '';
+    row.appendChild(companyCell);
+
+    const sportCell = document.createElement('td');
+    sportCell.textContent = foreignKeyLabels.get('sport_id')?.get(String(record.sport_id)) ?? '';
+    row.appendChild(sportCell);
+
+    const formatCell = document.createElement('td');
+    formatCell.textContent = getCourtFormatLabel(String(record.format));
+    row.appendChild(formatCell);
+
+    const stateCell = document.createElement('td');
+    const parent = record.parent_court_id == null
+      ? 'Cancha principal'
+      : `Subcancha de ${String(recordsById.get(String(record.parent_court_id))?.name ?? 'cancha principal')}`;
+    stateCell.textContent = `${parent}. ${isAffirmative(record.is_partitionable) ? 'Particionable' : 'No particionable'}. ${isAffirmative(record.is_active) ? 'Activa' : 'Inactiva'}.`;
+    row.appendChild(stateCell);
+
+    const childrenCell = document.createElement('td');
+    childrenCell.textContent = children.length === 0
+      ? 'Sin subcanchas'
+      : `${children.length} subcancha${children.length === 1 ? '' : 's'}`;
+    row.appendChild(childrenCell);
+
+    if (showActions) {
+      const actionsCell = document.createElement('td');
+      actionsCell.className = 'actions';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'edit-btn';
+      edit.textContent = getLocalizedText(structure.commonText.edit);
+      edit.addEventListener('click', () => window.editRecord('courts', String(record.id)));
+      actionsCell.appendChild(edit);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'delete-btn';
+      remove.textContent = getLocalizedText(structure.commonText.delete);
+      remove.addEventListener('click', () => window.deleteRecord('courts', String(record.id)));
+      actionsCell.appendChild(remove);
+      row.appendChild(actionsCell);
+    }
+
+    tbody.appendChild(row);
+    children.forEach((child) => appendCourt(child, depth + 1, rootId));
+  };
+
+  rootRecords.forEach((record) => appendCourt(record, 0, String(record.id)));
+}
+
 function canEditTable(tableStructure: TableStructure): boolean {
   const pkFields = Array.isArray(tableStructure.pk)
     ? tableStructure.pk
@@ -871,11 +1016,16 @@ function canEditTable(tableStructure: TableStructure): boolean {
   );
 }
 
-async function fetchAllRows(tableName: string): Promise<Record<string, unknown>[]> {
+async function fetchAllRows(
+  tableName: string,
+  query = new URLSearchParams()
+): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
 
   for (let page = 1; ; page++) {
-    const pageRows = await fetchRows(`/${tableName}?page=${page}`) as Record<string, unknown>[];
+    const pageQuery = new URLSearchParams(query);
+    pageQuery.set('page', String(page));
+    const pageRows = await fetchRows(`/${tableName}?${pageQuery.toString()}`) as Record<string, unknown>[];
     rows.push(...pageRows);
 
     if (pageRows.length < PAGE_SIZE) return rows;
@@ -922,6 +1072,11 @@ function renderAnyTable<K extends TableKey>(
   records: TableRecordMap[K][],
   foreignKeyLabels: Map<string, Map<string, string>>
 ): void {
+  if (tableKey === 'courts') {
+    renderCourtsTable(records as TableRecordMap['courts'][], foreignKeyLabels);
+    return;
+  }
+
   const thead = sharedTable.querySelector('thead')!;
   const tbody = sharedTable.querySelector('tbody')!;
   const tableStructure = structure.tables[tableKey];
@@ -933,7 +1088,11 @@ function renderAnyTable<K extends TableKey>(
 
   const headerRow = document.createElement('tr');
 
-  Object.entries(tableStructure.columns).forEach(([fieldName, column]) => {
+  const visibleColumns = Object.entries(tableStructure.columns).filter(
+    ([, column]) => column.visible !== false
+  );
+
+  visibleColumns.forEach(([fieldName, column]) => {
     const th = document.createElement('th');
 
     th.textContent = getLocalizedText(column.label as LocalizedText | string) || fieldName;
@@ -974,7 +1133,7 @@ function renderAnyTable<K extends TableKey>(
       : [tableStructure.pk];
 
     const row = document.createElement('tr');
-    const columnNames = Object.keys(tableStructure.columns) as Array<
+    const columnNames = visibleColumns.map(([fieldName]) => fieldName) as Array<
       keyof TableRecordMap[K] & string
     >;
 
@@ -982,13 +1141,17 @@ function renderAnyTable<K extends TableKey>(
       const td = document.createElement('td');
       const value = record[name];
       const label = foreignKeyLabels.get(name)?.get(String(value));
+      const column = (tableStructure.columns as Record<string, ColumnDef>)[name];
+      const optionLabel = column?.options?.find(
+        (option) => option.value === String(value)
+      )?.label;
 
       if (tableKey === 'court_partition_rules' && (name === 'source_format' || name === 'target_format')) {
         td.textContent = getCourtFormatLabel(String(value ?? ''));
       } else if (tableKey === 'court_partition_rules' && name === 'layout_json') {
         td.textContent = describePartitionLayout(value);
       } else {
-        td.textContent = label ?? String(value ?? '');
+        td.textContent = label ?? (getLocalizedText(optionLabel) || formatDisplayValue(value));
       }
       row.appendChild(td);
     });
@@ -1046,6 +1209,10 @@ async function loadTableData<K extends TableKey>(tableKey: K): Promise<void> {
       params.set('dir', currentState.dir || 'asc');
     }
 
+    if (currentState.search) {
+      params.set('search', currentState.search);
+    }
+
     for (const [fieldName, entries] of Object.entries(currentState.filters)) {
       for (const entry of entries) {
         const value = serializeFilterValue(fieldName, entry);
@@ -1054,6 +1221,14 @@ async function loadTableData<K extends TableKey>(tableKey: K): Promise<void> {
           params.append(`filter_${fieldName}`, value);
         }
       }
+    }
+
+    if (tableKey === 'courts') {
+      const data = await fetchAllRows(tableKey, params) as TableRecordMap[K][];
+      const foreignKeyLabels = await loadForeignKeyLabels(tableKey, data);
+      renderAnyTable(tableKey, data, foreignKeyLabels);
+      paginationContainer.innerHTML = '';
+      return;
     }
 
     const response = await apiFetch(`/${tableKey}?${params.toString()}`);
@@ -1549,6 +1724,104 @@ async function renderPermissionsView(): Promise<void> {
   title.textContent = getLocalizedText(structure.commonText.companyPermissions);
   permissionsSection.appendChild(title);
 
+  const createUserForm = document.createElement('form');
+  createUserForm.className = 'admin-user-form';
+
+  const createUserTitle = document.createElement('h3');
+  createUserTitle.textContent = getLocalizedText(structure.commonText.createUser);
+  createUserForm.appendChild(createUserTitle);
+
+  const usernameInput = document.createElement('input');
+  usernameInput.name = 'username';
+  usernameInput.autocomplete = 'username';
+  usernameInput.minLength = 3;
+  usernameInput.maxLength = 80;
+  usernameInput.pattern = '[A-Za-z0-9._-]{3,80}';
+
+  const emailInput = document.createElement('input');
+  emailInput.name = 'email';
+  emailInput.type = 'email';
+  emailInput.autocomplete = 'email';
+  emailInput.maxLength = 255;
+
+  const passwordInput = document.createElement('input');
+  passwordInput.name = 'password';
+  passwordInput.type = 'password';
+  passwordInput.autocomplete = 'new-password';
+  passwordInput.minLength = 12;
+
+  const userRoleSelect = document.createElement('select');
+  userRoleSelect.name = 'role';
+  [
+    { value: 'reader', label: structure.commonText.userAccount },
+    { value: 'editor', label: structure.commonText.companyAccount },
+  ].forEach((role) => {
+    const option = document.createElement('option');
+    option.value = role.value;
+    option.textContent = getLocalizedText(role.label);
+    userRoleSelect.appendChild(option);
+  });
+
+  appendAvailabilityControl(createUserForm, structure.commonText.usernameLabel, usernameInput);
+  appendAvailabilityControl(createUserForm, structure.commonText.emailLabel, emailInput);
+  appendAvailabilityControl(createUserForm, structure.commonText.password, passwordInput);
+  appendAvailabilityControl(createUserForm, structure.commonText.userRole, userRoleSelect);
+
+  const createUserButton = document.createElement('button');
+  createUserButton.type = 'submit';
+  createUserButton.textContent = getLocalizedText(structure.commonText.createUser);
+  createUserForm.appendChild(createUserButton);
+
+  const createUserFeedback = document.createElement('p');
+  createUserFeedback.className = 'admin-user-feedback';
+  createUserFeedback.hidden = true;
+  createUserForm.appendChild(createUserFeedback);
+
+  createUserForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    try {
+      const response = await apiFetch('/admin/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: usernameInput.value,
+          email: emailInput.value,
+          password: passwordInput.value,
+          role: userRoleSelect.value,
+        }),
+      });
+
+      if (!response.ok) {
+        createUserFeedback.textContent = await errorMessage(response);
+        createUserFeedback.dataset.status = 'error';
+        createUserFeedback.hidden = false;
+        return;
+      }
+
+      const createdUser = await response.json() as AuthUser;
+      createUserForm.reset();
+      createUserFeedback.textContent = getLocalizedText(structure.commonText.userCreated);
+      createUserFeedback.dataset.status = 'success';
+      createUserFeedback.hidden = false;
+
+      const option = document.createElement('option');
+      option.value = String(createdUser.id);
+      option.textContent = createdUser.username;
+      userSelect.appendChild(option);
+      userSelect.value = option.value;
+      await loadLinks();
+    } catch (error) {
+      const message = (error as Error).message;
+
+      if (message === 'Authentication required' || message === 'Forbidden') return;
+
+      createUserFeedback.textContent = getLocalizedText(structure.commonText.errorSaving);
+      createUserFeedback.dataset.status = 'error';
+      createUserFeedback.hidden = false;
+      console.error('Error creating user:', error);
+    }
+  });
+
   const form = document.createElement('form');
   form.className = 'company-permissions-form';
 
@@ -1582,6 +1855,7 @@ async function renderPermissionsView(): Promise<void> {
   const linksOutput = document.createElement('div');
   linksOutput.className = 'company-permissions-output';
 
+  permissionsSection.appendChild(createUserForm);
   permissionsSection.appendChild(form);
   permissionsSection.appendChild(linksOutput);
 
@@ -1804,6 +2078,37 @@ function createFilterControl(
 
 function renderFilters<K extends TableKey>(tableKey: K): void {
   filterContainer.innerHTML = '';
+
+  const searchHints: Partial<Record<TableKey, string>> = {
+    courts: 'Buscar por cancha, empresa, deporte, formato o estado',
+    companies: 'Buscar por empresa, ciudad o estado',
+    court_partition_rules: 'Buscar reglas por formato',
+    court_prices: 'Buscar por cancha o deporte',
+    company_time_blocks: 'Buscar por empresa',
+  };
+  const searchGroup = document.createElement('div');
+  searchGroup.className = 'context-search';
+  const searchLabel = document.createElement('label');
+  searchLabel.htmlFor = 'context-search-input';
+  searchLabel.textContent = 'Buscar';
+  const searchInput = document.createElement('input');
+  searchInput.id = 'context-search-input';
+  searchInput.type = 'search';
+  searchInput.placeholder = searchHints[tableKey] ?? 'Buscar';
+  searchInput.value = currentState.search ?? '';
+  let searchTimer: number | undefined;
+  searchInput.addEventListener('input', () => {
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => {
+      currentState.search = searchInput.value.trim() || undefined;
+      currentState.page = 1;
+      syncStateToUrl();
+      loadTableData(tableKey);
+    }, 250);
+  });
+  searchGroup.append(searchLabel, searchInput);
+  filterContainer.appendChild(searchGroup);
+  return;
 
   const tableStructure = structure.tables[tableKey];
   const allColumns = Object.entries(tableStructure.columns);
@@ -2110,6 +2415,18 @@ async function renderFormField<K extends TableKey>(
 
   wrapper.appendChild(inputEl);
 
+  if (
+    column.foreignKey?.table === 'companies' &&
+    inputEl instanceof HTMLSelectElement
+  ) {
+    setupCompanySelector(
+      wrapper,
+      inputEl,
+      column.foreignKey,
+      record?.[fieldName]
+    );
+  }
+
   const errorEl = document.createElement('small');
   errorEl.className = 'field-error';
   errorEl.id = `${id}-error`;
@@ -2166,9 +2483,74 @@ async function loadDefaultOptions(column: ColumnDef): Promise<void> {
 
     return {
       value,
-      label: `${value} - ${getForeignKeyLabel(record, foreignKey)}`,
+      label: getForeignKeyLabel(record, foreignKey),
     };
   }) as any;
+}
+
+function fillForeignKeySelect(
+  select: HTMLSelectElement,
+  rows: unknown[],
+  foreignKey: ForeignKeyDef,
+  selectedValue: unknown
+): void {
+  resetSelectOptions(select, '--');
+
+  rows.forEach((row) => {
+    const record = row as Record<string, unknown>;
+    const option = document.createElement('option');
+    option.value = String(record[foreignKey.valueField] ?? '');
+    option.textContent = getForeignKeyLabel(record, foreignKey);
+    select.appendChild(option);
+  });
+
+  if (selectedValue != null) select.value = String(selectedValue);
+}
+
+function setupCompanySelector(
+  wrapper: HTMLElement,
+  select: HTMLSelectElement,
+  foreignKey: ForeignKeyDef,
+  selectedValue: unknown
+): void {
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'company-select-search';
+  search.placeholder = 'Buscar empresa';
+  search.setAttribute('aria-label', 'Buscar empresa');
+  select.insertAdjacentElement('beforebegin', search);
+
+  let timer: number | undefined;
+  const load = async () => {
+    const query = new URLSearchParams({ page: '1' });
+    if (search.value.trim()) query.set('search', search.value.trim());
+    const rows = await fetchRows(`/companies?${query.toString()}`);
+    fillForeignKeySelect(select, rows, foreignKey, select.value || selectedValue);
+  };
+
+  search.addEventListener('input', () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      load().catch((error) => console.error('Error searching companies:', error));
+    }, 250);
+  });
+
+  wrapper.classList.add('company-select-group');
+
+  if (selectedValue != null && !select.value) {
+    apiFetch(`/companies?id=${encodeURIComponent(String(selectedValue))}`)
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((result: ApiResponse | null) => {
+        const company = result?.data as Record<string, unknown> | undefined;
+        if (!company) return;
+        const option = document.createElement('option');
+        option.value = String(company[foreignKey.valueField] ?? '');
+        option.textContent = getForeignKeyLabel(company, foreignKey);
+        option.selected = true;
+        select.appendChild(option);
+      })
+      .catch((error) => console.error('Error loading selected company:', error));
+  }
 }
 
 function resetSelectOptions(select: HTMLSelectElement, placeholder: string): void {
@@ -2292,7 +2674,10 @@ function setupPartitionRuleLayout(record?: Partial<TableRecordMap['court_partiti
   update();
 }
 
-function setupCourtPartitionRuleOptions(): void {
+function setupCourtPartitionRuleOptions(
+  record?: Partial<TableRecordMap['courts']>,
+  isEdit = false
+): void {
   const formatSelect = document.getElementById('courts-format') as HTMLSelectElement | null;
   const partitionableSelect = document.getElementById('courts-is_partitionable') as HTMLSelectElement | null;
 
@@ -2316,16 +2701,36 @@ function setupCourtPartitionRuleOptions(): void {
   error.id = 'courts-partition_rule_id-error';
   field.appendChild(error);
 
+  const savedPartitionable = isAffirmative(record?.is_partitionable);
+  let applyButton: HTMLButtonElement | null = null;
+
+  if (isEdit) {
+    const help = document.createElement('small');
+    help.className = 'field-hint';
+    help.textContent = savedPartitionable
+      ? 'Guardar ediciones no crea subcanchas. Aplicá una regla de forma explícita cuando estés listo.'
+      : 'Guardar esta edición solo actualiza la cancha. Marcala como particionable y volvé a abrirla para aplicar una regla.';
+    field.appendChild(help);
+
+    if (savedPartitionable) {
+      applyButton = document.createElement('button');
+      applyButton.type = 'button';
+      applyButton.className = 'edit-btn';
+      applyButton.textContent = 'Aplicar regla de partición';
+      field.appendChild(applyButton);
+    }
+  }
+
   formatSelect.closest('.form-group')?.insertAdjacentElement('afterend', field);
 
   let loadVersion = 0;
   const update = async () => {
     const version = ++loadVersion;
     const format = formatSelect.value;
-    const isPartitionable = partitionableSelect.value === 'true';
+    const isPartitionable = isEdit ? savedPartitionable : partitionableSelect.value === 'true';
 
     field.hidden = !isPartitionable;
-    ruleSelect.required = isPartitionable;
+    ruleSelect.required = !isEdit && isPartitionable;
     ruleSelect.classList.remove('invalid');
     error.textContent = '';
 
@@ -2385,10 +2790,35 @@ function setupCourtPartitionRuleOptions(): void {
   };
 
   formatSelect.addEventListener('change', () => {
-    update().catch(() => undefined);
+    if (!isEdit) update().catch(() => undefined);
   });
   partitionableSelect.addEventListener('change', () => {
-    update().catch(() => undefined);
+    if (!isEdit) update().catch(() => undefined);
+  });
+
+  applyButton?.addEventListener('click', async () => {
+    if (!ruleSelect.value || !record?.id || !record.company_id) {
+      error.textContent = 'Elegí una regla de partición para continuar.';
+      ruleSelect.classList.add('invalid');
+      return;
+    }
+
+    const response = await apiFetch(
+      `/companies/${encodeURIComponent(String(record.company_id))}/courts/${encodeURIComponent(String(record.id))}/partition`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ partition_rule_id: Number(ruleSelect.value) }),
+      }
+    );
+
+    if (!response.ok) {
+      error.textContent = await errorMessage(response);
+      return;
+    }
+
+    hideAnyForm();
+    showSuccessMessage('Regla de partición aplicada.');
+    loadTableData('courts');
   });
 
   update().catch(() => undefined);
@@ -2654,6 +3084,82 @@ export function hideAnyForm(): void {
   formContainer.innerHTML = '';
 }
 
+async function renderCompanySportsManager(
+  companyId?: number
+): Promise<HTMLElement> {
+  const fieldset = document.createElement('fieldset');
+  fieldset.className = 'company-sports-manager';
+  fieldset.id = 'company-sports-manager';
+  const legend = document.createElement('legend');
+  legend.textContent = 'Deportes habilitados';
+  fieldset.appendChild(legend);
+
+  const [sports, links] = await Promise.all([
+    fetchAllRows('sports'),
+    companyId
+      ? fetchRows(`/company_sports?page=1&filter_company_id=${encodeURIComponent(String(companyId))}`)
+      : Promise.resolve([]),
+  ]);
+  const selectedSportIds = new Set(
+    links.map((link) => String((link as Record<string, unknown>).sport_id ?? ''))
+  );
+
+  sports.forEach((sport) => {
+    const record = sport as Record<string, unknown>;
+    const label = document.createElement('label');
+    label.className = 'company-sport-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.name = 'company-sport';
+    checkbox.value = String(record.id ?? '');
+    checkbox.checked = selectedSportIds.has(checkbox.value);
+    label.append(checkbox, document.createTextNode(String(record.name ?? '')));
+    fieldset.appendChild(label);
+  });
+
+  return fieldset;
+}
+
+async function syncCompanySports(companyId: number): Promise<void> {
+  const manager = document.getElementById('company-sports-manager');
+  if (!manager) return;
+
+  const selectedSportIds = new Set(
+    Array.from(manager.querySelectorAll<HTMLInputElement>('input[name="company-sport"]:checked'))
+      .map((input) => input.value)
+  );
+  const links = await fetchRows(
+    `/company_sports?page=1&filter_company_id=${encodeURIComponent(String(companyId))}`
+  );
+  const existingSportIds = new Set(
+    links.map((link) => String((link as Record<string, unknown>).sport_id ?? ''))
+  );
+
+  await Promise.all([
+    ...[...selectedSportIds]
+      .filter((sportId) => !existingSportIds.has(sportId))
+      .map(async (sportId) => {
+        const response = await apiFetch('/company_sports', {
+          method: 'POST',
+          body: JSON.stringify({ company_id: companyId, sport_id: Number(sportId) }),
+        });
+        if (!response.ok) throw new Error(await errorMessage(response));
+      }),
+    ...[...existingSportIds]
+      .filter((sportId) => !selectedSportIds.has(sportId))
+      .map(async (sportId) => {
+        const params = new URLSearchParams({
+          company_id: String(companyId),
+          sport_id: sportId,
+        });
+        const response = await apiFetch(`/company_sports?${params.toString()}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) throw new Error(await errorMessage(response));
+      }),
+  ]);
+}
+
 async function showAnyForm<K extends TableKey>(
   tableKey: K,
   record?: Partial<TableRecordMap[K]>
@@ -2698,6 +3204,13 @@ async function showAnyForm<K extends TableKey>(
 
   fields.forEach((field) => form.appendChild(field));
 
+  if (tableKey === 'companies') {
+    const companyRecord = record as Record<string, unknown> | undefined;
+    form.appendChild(await renderCompanySportsManager(
+      companyRecord?.id == null ? undefined : Number(companyRecord.id)
+    ));
+  }
+
   const actionsDiv = document.createElement('div');
   actionsDiv.className = 'form-actions';
 
@@ -2726,9 +3239,10 @@ async function showAnyForm<K extends TableKey>(
     await setupCourtSportOptions(record as Partial<TableRecordMap['courts']> | undefined);
     setupCourtFormatOptions(record as Partial<TableRecordMap['courts']> | undefined);
 
-    if (!isEdit) {
-      setupCourtPartitionRuleOptions();
-    }
+    setupCourtPartitionRuleOptions(
+      record as Partial<TableRecordMap['courts']> | undefined,
+      isEdit
+    );
   }
 
   if (tableKey === 'court_prices') {
@@ -2788,6 +3302,14 @@ async function showAnyForm<K extends TableKey>(
 
       if (!responseJson.success) {
         return showErrorMessage(responseJson.message ?? 'Error saving record');
+      }
+
+      if (tableKey === 'companies') {
+        const companyRecord = record as Record<string, unknown> | undefined;
+        const companyId = Number(
+          (isEdit ? companyRecord?.id : (responseJson.data as Record<string, unknown> | undefined)?.id) ?? 0
+        );
+        if (companyId > 0) await syncCompanySports(companyId);
       }
 
       hideAnyForm();
@@ -2921,6 +3443,12 @@ const initialTheme = localStorage.getItem('theme') || 'light';
 document.body.setAttribute('data-theme', initialTheme);
 
 applyStaticLanguageToUI();
+
+homeBtn.addEventListener('click', goHome);
+
+changePasswordBtn.addEventListener('click', () => {
+  if (currentUser) showPasswordChange(currentUser, currentCompanyLinks);
+});
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();

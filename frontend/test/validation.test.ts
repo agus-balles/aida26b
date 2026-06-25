@@ -34,3 +34,27 @@ test('partition rules use named layout templates before the derived child count'
   expect(columns.layout_json.options?.every((option) => !option.label.es.includes('JSON'))).toBe(true);
   expect(fields.indexOf('layout_json')).toBeLessThan(fields.indexOf('child_count'));
 });
+
+test('operational court views hide internal identifiers and layout coordinates', () => {
+  const columns = structure.tables.courts.columns;
+
+  expect(structure.tables.company_sports.showInNavigation).toBe(false);
+  expect(columns.id.visible).toBe(false);
+  expect(columns.parent_court_id.visible).toBe(false);
+  expect(columns.layout_x.visible).toBe(false);
+  expect(columns.layout_y.visible).toBe(false);
+  expect(columns.layout_width.visible).toBe(false);
+  expect(columns.layout_height.visible).toBe(false);
+});
+
+test('partition rules use semantic priority and keep usable area internal', () => {
+  const columns = structure.tables.court_partition_rules.columns;
+
+  expect(columns.usable_area_ratio.visible).toBe(false);
+  expect(columns.usable_area_ratio.editable).toBe(false);
+  expect(columns.priority.options?.map((option) => option.label.es)).toEqual([
+    'Baja',
+    'Media',
+    'Alta',
+  ]);
+});

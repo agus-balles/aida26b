@@ -55,7 +55,10 @@ class FakeDb {
     }
     if (sql.startsWith('INSERT INTO auth.users')) {
       if (this.users.some((user) => user.username === params[0])) {
-        throw Object.assign(new Error('duplicate username'), { code: '23505' });
+        throw Object.assign(new Error('duplicate username'), { code: '23505', constraint: 'users_username_key' });
+      }
+      if (params[1] && this.users.some((user) => user.email === params[1])) {
+        throw Object.assign(new Error('duplicate email'), { code: '23505', constraint: 'users_email_unique' });
       }
       const user = {
         id: this.nextUserId++,
@@ -65,7 +68,7 @@ class FakeDb {
         password_salt: params[3],
         role: sql.includes("'reader'") ? 'reader' : params[4],
         is_active: true,
-        must_change_password: true,
+        must_change_password: false,
       };
       this.users.push(user);
       return { rows: [publicRow(user)] };
@@ -268,7 +271,7 @@ test('unlinked non-admin users cannot create companies or manage users', async (
     });
     assert.equal(createCompany.status, 403);
 
-    const createUser = await request(baseUrl, '/api/admin/users', { method: 'POST', cookie, body: { username: 'other', password: 'otherpass', role: 'reader' } });
+    const createUser = await request(baseUrl, '/api/admin/users', { method: 'POST', cookie, body: { username: 'other', email: 'other@example.com', password: 'OtherPass123', role: 'reader' } });
     assert.equal(createUser.status, 403);
   });
 });
@@ -277,16 +280,58 @@ test('admin can create users and reset passwords', async () => {
   const db = await makeDb();
   await withServer(db, async (baseUrl) => {
     const adminCookie = await login(baseUrl, 'admin', 'adminpass');
-    const created = await request(baseUrl, '/api/admin/users', { method: 'POST', cookie: adminCookie, body: { username: 'newreader', password: 'firstpass', role: 'reader' } });
+    const created = await request(baseUrl, '/api/admin/users', { method: 'POST', cookie: adminCookie, body: { username: 'newreader', email: 'newreader@example.com', password: 'FirstPass123', role: 'reader' } });
     assert.equal(created.status, 201);
     assert.equal(created.body.role, 'reader');
+    assert.equal(created.body.must_change_password, false);
 
-    const reset = await request(baseUrl, `/api/admin/users/${created.body.id}/reset-password`, { method: 'POST', cookie: adminCookie, body: { password: 'secondpass' } });
+    const reset = await request(baseUrl, `/api/admin/users/${created.body.id}/reset-password`, { method: 'POST', cookie: adminCookie, body: { password: 'SecondPass123' } });
     assert.equal(reset.status, 200);
 
-    const newCookie = await login(baseUrl, 'newreader', 'secondpass');
+    const newCookie = await login(baseUrl, 'newreader', 'SecondPass123');
     const me = await request(baseUrl, '/api/auth/me', { cookie: newCookie });
-    assert.equal(me.body.user.must_change_password, true);
+    assert.equal(me.body.user.must_change_password, false);
+  });
+});
+
+test('admin validates mandatory user credentials and supports the company role', async () => {
+  const db = await makeDb();
+  await withServer(db, async (baseUrl) => {
+    const adminCookie = await login(baseUrl, 'admin', 'adminpass');
+
+    const missingEmail = await request(baseUrl, '/api/admin/users', {
+      method: 'POST',
+      cookie: adminCookie,
+      body: { username: 'companyuser', password: 'CompanyPass123', role: 'editor' },
+    });
+    assert.equal(missingEmail.status, 400);
+    assert.match(missingEmail.body.error, /email válido/);
+
+    const weakPassword = await request(baseUrl, '/api/admin/users', {
+      method: 'POST',
+      cookie: adminCookie,
+      body: { username: 'companyuser', email: 'company@example.com', password: 'shortpass', role: 'editor' },
+    });
+    assert.equal(weakPassword.status, 400);
+    assert.match(weakPassword.body.error, /12 caracteres/);
+
+    const created = await request(baseUrl, '/api/admin/users', {
+      method: 'POST',
+      cookie: adminCookie,
+      body: { username: 'companyuser', email: 'company@example.com', password: 'CompanyPass123', role: 'editor' },
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.role, 'editor');
+
+    assert.ok(await login(baseUrl, 'companyuser', 'CompanyPass123'));
+
+    const duplicateEmail = await request(baseUrl, '/api/admin/users', {
+      method: 'POST',
+      cookie: adminCookie,
+      body: { username: 'othercompany', email: 'company@example.com', password: 'OtherCompany123', role: 'editor' },
+    });
+    assert.equal(duplicateEmail.status, 409);
+    assert.equal(duplicateEmail.body.error, 'El email ya está registrado.');
   });
 });
 
@@ -317,21 +362,19 @@ test('admin can assign and remove company roles', async () => {
   });
 });
 
-test('first login users must change password before using the app', async () => {
+test('new users can use the app and change their password voluntarily', async () => {
   const db = await makeDb();
   await withServer(db, async (baseUrl) => {
     const adminCookie = await login(baseUrl, 'admin', 'adminpass');
-    await request(baseUrl, '/api/admin/users', { method: 'POST', cookie: adminCookie, body: { username: 'tempuser', password: 'temppass1', role: 'reader' } });
+    await request(baseUrl, '/api/admin/users', { method: 'POST', cookie: adminCookie, body: { username: 'tempuser', email: 'tempuser@example.com', password: 'TempPass1234', role: 'reader' } });
 
-    const tempCookie = await login(baseUrl, 'tempuser', 'temppass1');
-    const blocked = await request(baseUrl, '/api/companies', { cookie: tempCookie });
-    assert.equal(blocked.status, 403);
-    assert.equal(blocked.body.error, 'Password change required');
+    const tempCookie = await login(baseUrl, 'tempuser', 'TempPass1234');
+    assert.equal((await request(baseUrl, '/api/companies', { cookie: tempCookie })).status, 200);
 
     const changed = await request(baseUrl, '/api/auth/change-password', {
       method: 'POST',
       cookie: tempCookie,
-      body: { current_password: 'temppass1', new_password: 'newpass123' },
+      body: { current_password: 'TempPass1234', new_password: 'NewPass12345' },
     });
     assert.equal(changed.status, 200);
     assert.equal(changed.body.user.must_change_password, false);

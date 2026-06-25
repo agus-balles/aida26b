@@ -55,6 +55,8 @@ type ColumnDef = {
   editable?: boolean;
   required?: boolean;
   readonlyOnEdit?: boolean;
+  visible?: boolean;
+  searchable?: boolean;
   validator?: ColumnValidator;
   nullable?: boolean;
   derivable?: {originTable: string, sqlGenerationStatement: string};
@@ -68,6 +70,7 @@ type TableStructure = {
   title?: LocalizedText
   addButtonLabel?: LocalizedText
   referencedTables?: string[]
+  showInNavigation?: boolean
 }
 
 type InferType<FieldDefs extends Record<string, ColumnDef>> = {

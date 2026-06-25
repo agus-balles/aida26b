@@ -346,20 +346,6 @@ function normalizeCourtRow(row: CourtRow): CourtRow {
   };
 }
 
-async function fetchBestRule(queryable: Queryable, sourceFormat: string): Promise<PartitionRuleRow | null> {
-  const result = await queryable.query<PartitionRuleRow>(
-    `SELECT *
-     FROM court_partition_rules
-     WHERE source_format = $1
-       AND is_active = true
-     ORDER BY priority DESC, usable_area_ratio DESC, child_count DESC, id ASC
-     LIMIT 1`,
-    [sourceFormat]
-  );
-
-  return result.rows[0] ?? null;
-}
-
 async function selectRootRule(
   queryable: Queryable,
   sourceFormat: string,
@@ -401,28 +387,14 @@ async function selectRootRule(
   return result.rows[0];
 }
 
-async function hasChildRule(queryable: Queryable, sourceFormat: string): Promise<boolean> {
-  const result = await queryable.query<{ exists: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1
-       FROM court_partition_rules
-       WHERE source_format = $1
-         AND is_active = true
-     ) AS exists`,
-    [sourceFormat]
-  );
-
-  return result.rows[0]?.exists === true;
-}
-
-async function createChildCourts(
+export async function createChildCourts(
   client: PoolClient,
   parent: CourtRow,
   rootCourtId: number,
   required: boolean,
   selectedRule?: PartitionRuleRow
 ) {
-  const rule = selectedRule ?? await fetchBestRule(client, parent.format);
+  const rule = selectedRule;
 
   if (!rule) {
     if (required) {
@@ -436,7 +408,6 @@ async function createChildCourts(
   const parentY = toNumber(parent.layout_y);
   const parentWidth = toNumber(parent.layout_width);
   const parentHeight = toNumber(parent.layout_height);
-  const childIsPartitionable = await hasChildRule(client, rule.target_format);
   const childSportId = rule.target_sport_id == null
     ? parent.sport_id
     : Number(rule.target_sport_id);
@@ -458,7 +429,7 @@ async function createChildCourts(
 
   for (let index = 0; index < layout.length; index++) {
     const rect = layout[index];
-    const child = await client.query<CourtRow>(
+    await client.query<CourtRow>(
       `INSERT INTO courts
        (company_id, parent_court_id, root_court_id, name, format, sport_id,
         is_partitionable, is_auto_generated, layout_x, layout_y, layout_width, layout_height)
@@ -471,15 +442,13 @@ async function createChildCourts(
         `${parent.name} ${rule.target_format.replace('soccer_', '').replace(/_/g, ' ')}.${index + 1}`,
         rule.target_format,
         childSportId,
-        childIsPartitionable,
+        false,
         parentX + rect.x * parentWidth,
         parentY + rect.y * parentHeight,
         rect.width * parentWidth,
         rect.height * parentHeight,
       ]
     );
-
-    await createChildCourts(client, normalizeCourtRow(child.rows[0]), rootCourtId, false);
   }
 }
 
@@ -561,6 +530,68 @@ export function createCourtWithPartitions(pool: Pool) {
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
       return sendReservationError(res, error, 'Error creating court');
+    } finally {
+      client.release();
+    }
+  };
+}
+
+export function applyCourtPartitionRule(pool: Pool) {
+  return async (req: Request, res: Response) => {
+    const client = await pool.connect();
+
+    try {
+      const companyId = readPositiveInteger(req.params.companyId, 'companyId');
+      const courtId = readPositiveInteger(req.params.courtId, 'cancha_id');
+      const partitionRuleId = readPositiveInteger(req.body.partition_rule_id, 'partition_rule_id');
+      await requireCompanyAccess(client, req, companyId, true);
+
+      await client.query('BEGIN');
+
+      const courtResult = await client.query<CourtRow>(
+        `SELECT *
+         FROM courts
+         WHERE id = $1 AND company_id = $2 AND is_active = true
+         FOR UPDATE`,
+        [courtId, companyId]
+      );
+
+      if (courtResult.rowCount === 0) {
+        throw new HttpError(404, { error: 'La cancha seleccionada no está disponible.' });
+      }
+
+      const court = normalizeCourtRow(courtResult.rows[0]);
+
+      if (!court.is_partitionable) {
+        throw new HttpError(400, {
+          error: 'Marcá la cancha como particionable y guardá el cambio antes de aplicar una regla.',
+        });
+      }
+
+      const existingChildren = await client.query(
+        'SELECT 1 FROM courts WHERE parent_court_id = $1 AND is_active = true LIMIT 1',
+        [court.id]
+      );
+
+      if (existingChildren.rowCount !== 0) {
+        throw new HttpError(409, {
+          error: 'Esta cancha ya tiene subcanchas. No se puede aplicar otra regla.',
+        });
+      }
+
+      const rule = await selectRootRule(client, court.format, partitionRuleId);
+      await createChildCourts(client, court, court.root_court_id ?? court.id, true, rule);
+      await client.query('COMMIT');
+
+      const tree = await fetchCourtTree(pool, companyId, court.root_court_id ?? court.id);
+      return res.status(201).json({
+        success: true,
+        message: 'Regla de partición aplicada.',
+        data: tree,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      return sendReservationError(res, error, 'Error applying partition rule');
     } finally {
       client.release();
     }
