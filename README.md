@@ -95,9 +95,12 @@ DB_USER=aida26_user
 DB_PASSWORD=CambiaEsta!
 PORT=3000
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=yourpassword
+ADMIN_PASSWORD=AdminPass1234
 ADMIN_EMAIL=admin@example.com
 ```
+
+`ADMIN_PASSWORD` debe tener al menos 12 caracteres e incluir mayúscula,
+minúscula y número.
 
 Comandos:
 

@@ -21,6 +21,14 @@ export function isRole(value: unknown): value is Role {
   return value === 'admin' || value === 'editor' || value === 'reader';
 }
 
+export function isStrongPassword(value: unknown): value is string {
+  return typeof value === 'string' &&
+    value.length >= 12 &&
+    /[a-z]/.test(value) &&
+    /[A-Z]/.test(value) &&
+    /\d/.test(value);
+}
+
 export async function hashPassword(password: string, salt = crypto.randomBytes(16).toString('hex')) {
   const key = (await scrypt(password, salt, 64)) as Buffer;
   return { passwordHash: key.toString('hex'), passwordSalt: salt };

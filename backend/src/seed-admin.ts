@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { hashPassword } from './auth';
+import { hashPassword, isStrongPassword } from './auth';
 
 dotenv.config();
 
@@ -9,8 +9,8 @@ async function main() {
   const password = process.env.ADMIN_PASSWORD;
   const email = process.env.ADMIN_EMAIL?.trim() || null;
 
-  if (!username || !password || password.length < 8) {
-    throw new Error('ADMIN_USERNAME and ADMIN_PASSWORD with at least 8 characters are required');
+  if (!username || !isStrongPassword(password)) {
+    throw new Error('ADMIN_USERNAME and a strong ADMIN_PASSWORD are required');
   }
 
   const pool = new Pool({

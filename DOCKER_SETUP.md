@@ -61,7 +61,7 @@ docker run --rm --name aida26_app --network aida26_network \
   -e DB_USER=aida26_user \
   -e DB_PASSWORD=CambiaEsta! \
   -e ADMIN_USERNAME=admin \
-  -e ADMIN_PASSWORD=yourpassword \
+  -e ADMIN_PASSWORD=AdminPass1234 \
   -e ADMIN_EMAIL=admin@example.com \
   -p 3000:3000 \
   aida26-app
@@ -211,7 +211,8 @@ To use different values, create a `.env` file in the project root. An example is
 
 ```bash
 cp .env.example .env
-# Edit .env and set secure values, especially DB_PASSWORD
+# Edit .env and set secure values, especially DB_PASSWORD and ADMIN_PASSWORD.
+# ADMIN_PASSWORD must have 12+ chars with uppercase, lowercase and a number.
 ```
 
 ## Troubleshooting

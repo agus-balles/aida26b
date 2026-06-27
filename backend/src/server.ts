@@ -53,14 +53,7 @@ function getSessionToken(req: Request) {
 }
 
 function readPassword(value: unknown) {
-  if (typeof value !== 'string') return null;
-
-  return value.length >= 12 &&
-    /[a-z]/.test(value) &&
-    /[A-Z]/.test(value) &&
-    /\d/.test(value)
-    ? value
-    : null;
+  return auth.isStrongPassword(value) ? value : null;
 }
 
 function readUsername(value: unknown) {
