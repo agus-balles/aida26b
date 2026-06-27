@@ -288,20 +288,7 @@ export const structure = {
           validator: {
             required: true,
           },
-          options: [
-            { value: 'soccer_11', label: { es: 'Fútbol 11', en: 'Soccer 11' } },
-            { value: 'soccer_9', label: { es: 'Fútbol 9', en: 'Soccer 9' } },
-            { value: 'soccer_8', label: { es: 'Fútbol 8', en: 'Soccer 8' } },
-            { value: 'soccer_7', label: { es: 'Fútbol 7', en: 'Soccer 7' } },
-            { value: 'soccer_6', label: { es: 'Fútbol 6', en: 'Soccer 6' } },
-            { value: 'soccer_5', label: { es: 'Fútbol 5', en: 'Soccer 5' } },
-            { value: 'padel', label: { es: 'Pádel', en: 'Padel' } },
-            { value: 'tennis', label: { es: 'Tenis', en: 'Tennis' } },
-            { value: 'basketball', label: { es: 'Básquet', en: 'Basketball' } },
-            { value: 'basketball_half', label: { es: 'Media cancha de básquet', en: 'Half basketball court' } },
-            { value: 'volleyball', label: { es: 'Vóley', en: 'Volleyball' } },
-            { value: 'volleyball_training', label: { es: 'Zona de entrenamiento de vóley', en: 'Volleyball training area' } },
-          ],
+          options: courtFormatOptions,
           searchable: true,
         },
 
@@ -608,6 +595,14 @@ export const structure = {
     } satisfies TableStructure,
   },
 
+  courtFormatsBySport: {
+    soccer: ['soccer_11', 'soccer_9', 'soccer_8', 'soccer_7', 'soccer_6', 'soccer_5'],
+    padel: ['padel'],
+    tennis: ['tennis'],
+    basketball: ['basketball'],
+    volleyball: ['volleyball'],
+  } satisfies Record<string, string[]>,
+
   menu: {
     theme: {
       title: { es: 'Tema', en: 'Theme' },
@@ -677,7 +672,10 @@ export const structure = {
     currentPassword: { es: 'Contraseña actual', en: 'Current Password' },
     newPassword: { es: 'Nueva contraseña', en: 'New Password' },
     logout: { es: 'Salir', en: 'Logout' },
+    yes: { es: 'Sí', en: 'Yes' },
+    no: { es: 'No', en: 'No' },
     added: { es: 'agregado', en: 'added' },
+    notApplicable: { es: 'No aplica', en: 'Not applicable' },
     availability: { es: 'Reservas', en: 'Bookings' },
     company: { es: 'Empresa', en: 'Company' },
     sport: { es: 'Deporte', en: 'Sport' },
@@ -691,6 +689,7 @@ export const structure = {
     bookingHeld: { es: 'Reserva bloqueada', en: 'Booking held' },
     bookingConfirmed: { es: 'Reserva confirmada', en: 'Booking confirmed' },
     publicBooking: { es: 'Reservar cancha', en: 'Book a court' },
+    childCourts: { es: 'subcanchas', en: 'child courts' },
     holdPendingOperator: {
       es: 'Tu solicitud quedó retenida. La empresa debe confirmarla antes de que venza.',
       en: 'Your request is on hold. The company must confirm it before it expires.',
@@ -711,6 +710,61 @@ export const structure = {
     manager: { es: 'Responsable', en: 'Manager' },
     staff: { es: 'Operador', en: 'Staff' },
     viewer: { es: 'Consulta', en: 'Viewer' },
+    selectSportFirst: { es: 'Seleccioná un deporte primero', en: 'Select a sport first' },
+    selectCompanyFirst: { es: 'Seleccioná una empresa primero', en: 'Select a company first' },
+    selectCourtFirst: { es: 'Seleccioná una cancha primero', en: 'Select a court first' },
+    selectFormatFirst: { es: 'Seleccioná un formato primero', en: 'Select a format first' },
+    partitionRule: { es: 'Regla de partición', en: 'Partition rule' },
+    applyPartitionRule: { es: 'Aplicar regla de partición', en: 'Apply partition rule' },
+    choosePartitionRule: { es: 'Elegí una regla de partición', en: 'Choose a partition rule' },
+    choosePartitionRuleToContinue: {
+      es: 'Elegí una regla de partición para continuar.',
+      en: 'Choose a partition rule to continue.',
+    },
+    loadingPartitionRules: { es: 'Cargando reglas...', en: 'Loading rules...' },
+    noActivePartitionRules: {
+      es: 'No hay reglas activas para este formato',
+      en: 'No active rules for this format',
+    },
+    noPartitionRuleAvailable: {
+      es: 'No hay una regla de partición disponible para este formato.',
+      en: 'No partition rule is available for this format.',
+    },
+    partitionRulesLoadFailed: {
+      es: 'No se pudieron cargar las reglas de partición.',
+      en: 'Could not load partition rules.',
+    },
+    partitionRulesLoadFailedShort: {
+      es: 'No se pudieron cargar las reglas',
+      en: 'Could not load rules',
+    },
+    partitionRuleApplied: { es: 'Regla de partición aplicada.', en: 'Partition rule applied.' },
+    partitionPreview: { es: 'Vista previa de la distribución', en: 'Layout preview' },
+    partitionEditReadyHint: {
+      es: 'Guardar ediciones no crea subcanchas. Aplicá una regla de forma explícita cuando estés listo.',
+      en: 'Saving edits does not create child courts. Apply a rule explicitly when ready.',
+    },
+    partitionEditDisabledHint: {
+      es: 'Guardar esta edición solo actualiza la cancha. Marcala como particionable y volvé a abrirla para aplicar una regla.',
+      en: 'Saving this edit only updates the court. Mark it partitionable and reopen it to apply a rule.',
+    },
+    addCompanySportFirst: {
+      es: 'Primero agregá un deporte a la empresa',
+      en: 'Add a sport to the company first',
+    },
+    loadingCourtSport: {
+      es: 'Cargando deporte de la cancha...',
+      en: 'Loading court sport...',
+    },
+    courtNoSport: {
+      es: 'La cancha no tiene un deporte asignado',
+      en: 'The court has no assigned sport',
+    },
+    courtSportUnavailable: {
+      es: 'El deporte de la cancha no está disponible',
+      en: 'The court sport is unavailable',
+    },
+    layoutUnavailable: { es: 'Distribución no disponible', en: 'Layout unavailable' },
 
     // Auth / session messages
     sessionExpired: { es: 'La sesión expiró', en: 'Session expired' },

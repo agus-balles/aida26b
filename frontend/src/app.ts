@@ -864,19 +864,22 @@ function parsePartitionLayout(value: unknown): PartitionLayoutRect[] {
 }
 
 function describePartitionLayout(value: unknown): string {
+  const matchingOption = structure.tables.court_partition_rules.columns.layout_json.options?.find(
+    (option) => option.value === value
+  );
+
+  if (matchingOption) return getLocalizedText(matchingOption.label);
+
   const count = parsePartitionLayout(value).length;
 
-  if (count === 1) return 'Conversión de cancha completa';
-  if (count === 2) return '2 canchas lado a lado';
-  if (count === 3) return '3 canchas lado a lado';
-  if (count === 4) return '4 canchas en grilla 2x2';
-  if (count === 6) return '6 canchas en grilla 3x2';
-  return count > 0 ? `${count} subcanchas` : 'Distribución no disponible';
+  return count > 0
+    ? `${count} ${getLocalizedText(structure.commonText.childCourts)}`
+    : getLocalizedText(structure.commonText.layoutUnavailable);
 }
 
 function formatDisplayValue(value: unknown): string {
-  if (value === true || value === 'true') return getLocalizedText({ es: 'Sí', en: 'Yes' });
-  if (value === false || value === 'false') return getLocalizedText({ es: 'No', en: 'No' });
+  if (value === true || value === 'true') return getLocalizedText(structure.commonText.yes);
+  if (value === false || value === 'false') return getLocalizedText(structure.commonText.no);
   return String(value ?? '');
 }
 
@@ -2562,20 +2565,13 @@ function resetSelectOptions(select: HTMLSelectElement, placeholder: string): voi
   select.appendChild(option);
 }
 
-const courtFormatsBySport: Record<string, Array<{ value: string; label: LocalizedText }>> = {
-  soccer: [
-    { value: 'soccer_11', label: { es: 'Fútbol 11', en: 'Soccer 11' } },
-    { value: 'soccer_9', label: { es: 'Fútbol 9', en: 'Soccer 9' } },
-    { value: 'soccer_8', label: { es: 'Fútbol 8', en: 'Soccer 8' } },
-    { value: 'soccer_7', label: { es: 'Fútbol 7', en: 'Soccer 7' } },
-    { value: 'soccer_6', label: { es: 'Fútbol 6', en: 'Soccer 6' } },
-    { value: 'soccer_5', label: { es: 'Fútbol 5', en: 'Soccer 5' } },
-  ],
-  padel: [{ value: 'padel', label: { es: 'Pádel', en: 'Padel' } }],
-  tennis: [{ value: 'tennis', label: { es: 'Tenis', en: 'Tennis' } }],
-  basketball: [{ value: 'basketball', label: { es: 'Básquet', en: 'Basketball' } }],
-  volleyball: [{ value: 'volleyball', label: { es: 'Vóley', en: 'Volleyball' } }],
-};
+const courtFormatOptions =
+  structure.tables.courts.columns.format.options ?? [];
+const courtFormatOptionByValue = new Map(
+  courtFormatOptions.map((option) => [option.value, option])
+);
+const courtFormatsBySport =
+  structure.courtFormatsBySport as Record<string, string[]>;
 
 function setupCourtFormatOptions(record?: Partial<TableRecordMap['courts']>): void {
   const sportSelect = document.getElementById('courts-sport_id') as HTMLSelectElement | null;
@@ -2590,17 +2586,20 @@ function setupCourtFormatOptions(record?: Partial<TableRecordMap['courts']>): vo
 
     resetSelectOptions(
       formatSelect,
-      formats.length > 0 ? '--' : 'Seleccioná un deporte primero'
+      formats.length > 0 ? '--' : getLocalizedText(structure.commonText.selectSportFirst)
     );
 
     formats.forEach((format) => {
+      const formatOption = courtFormatOptionByValue.get(format);
+      if (!formatOption) return;
+
       const option = document.createElement('option');
-      option.value = format.value;
-      option.textContent = getLocalizedText(format.label);
+      option.value = formatOption.value;
+      option.textContent = getLocalizedText(formatOption.label);
       formatSelect.appendChild(option);
     });
 
-    if (formats.some((format) => format.value === selectedFormat)) {
+    if (formats.includes(selectedFormat)) {
       formatSelect.value = selectedFormat;
     }
 
@@ -2611,23 +2610,9 @@ function setupCourtFormatOptions(record?: Partial<TableRecordMap['courts']>): vo
   sportSelect.addEventListener('change', update);
 }
 
-const courtFormatLabels: Record<string, LocalizedText> = {
-  soccer_11: { es: 'Fútbol 11', en: 'Soccer 11' },
-  soccer_9: { es: 'Fútbol 9', en: 'Soccer 9' },
-  soccer_8: { es: 'Fútbol 8', en: 'Soccer 8' },
-  soccer_7: { es: 'Fútbol 7', en: 'Soccer 7' },
-  soccer_6: { es: 'Fútbol 6', en: 'Soccer 6' },
-  soccer_5: { es: 'Fútbol 5', en: 'Soccer 5' },
-  basketball: { es: 'Básquet', en: 'Basketball' },
-  basketball_half: { es: 'Media cancha de básquet', en: 'Half basketball court' },
-  volleyball: { es: 'Vóley', en: 'Volleyball' },
-  volleyball_training: { es: 'Zona de entrenamiento de vóley', en: 'Volleyball training area' },
-  tennis: { es: 'Tenis', en: 'Tennis' },
-  padel: { es: 'Pádel', en: 'Padel' },
-};
-
 function getCourtFormatLabel(format: string): string {
-  return getLocalizedText(courtFormatLabels[format] ?? format);
+  const formatOption = courtFormatOptionByValue.get(format);
+  return formatOption ? getLocalizedText(formatOption.label) : format;
 }
 
 function setupPartitionRuleLayout(record?: Partial<TableRecordMap['court_partition_rules']>): void {
@@ -2649,7 +2634,7 @@ function setupPartitionRuleLayout(record?: Partial<TableRecordMap['court_partiti
 
   const preview = document.createElement('div');
   preview.className = 'partition-layout-preview';
-  preview.setAttribute('aria-label', 'Vista previa de la distribución');
+  preview.setAttribute('aria-label', getLocalizedText(structure.commonText.partitionPreview));
   layoutSelect.closest('.form-group')?.appendChild(preview);
 
   const update = () => {
@@ -2689,7 +2674,7 @@ function setupCourtPartitionRuleOptions(
 
   const label = document.createElement('label');
   label.htmlFor = 'courts-partition_rule_id';
-  label.textContent = 'Regla de partición';
+  label.textContent = getLocalizedText(structure.commonText.partitionRule);
   field.appendChild(label);
 
   const ruleSelect = document.createElement('select');
@@ -2708,15 +2693,15 @@ function setupCourtPartitionRuleOptions(
     const help = document.createElement('small');
     help.className = 'field-hint';
     help.textContent = savedPartitionable
-      ? 'Guardar ediciones no crea subcanchas. Aplicá una regla de forma explícita cuando estés listo.'
-      : 'Guardar esta edición solo actualiza la cancha. Marcala como particionable y volvé a abrirla para aplicar una regla.';
+      ? getLocalizedText(structure.commonText.partitionEditReadyHint)
+      : getLocalizedText(structure.commonText.partitionEditDisabledHint);
     field.appendChild(help);
 
     if (savedPartitionable) {
       applyButton = document.createElement('button');
       applyButton.type = 'button';
       applyButton.className = 'edit-btn';
-      applyButton.textContent = 'Aplicar regla de partición';
+      applyButton.textContent = getLocalizedText(structure.commonText.applyPartitionRule);
       field.appendChild(applyButton);
     }
   }
@@ -2735,18 +2720,18 @@ function setupCourtPartitionRuleOptions(
     error.textContent = '';
 
     if (!isPartitionable) {
-      resetSelectOptions(ruleSelect, 'No aplica');
+      resetSelectOptions(ruleSelect, getLocalizedText(structure.commonText.notApplicable));
       return;
     }
 
     if (!format) {
-      resetSelectOptions(ruleSelect, 'Seleccioná un formato primero');
+      resetSelectOptions(ruleSelect, getLocalizedText(structure.commonText.selectFormatFirst));
       ruleSelect.disabled = true;
       return;
     }
 
     ruleSelect.disabled = false;
-    resetSelectOptions(ruleSelect, 'Cargando reglas...');
+    resetSelectOptions(ruleSelect, getLocalizedText(structure.commonText.loadingPartitionRules));
 
     try {
       const rules = (await fetchRows(
@@ -2758,15 +2743,15 @@ function setupCourtPartitionRuleOptions(
       if (version !== loadVersion) return;
 
       if (rules.length === 0) {
-        resetSelectOptions(ruleSelect, 'No hay reglas activas para este formato');
+        resetSelectOptions(ruleSelect, getLocalizedText(structure.commonText.noActivePartitionRules));
         ruleSelect.disabled = true;
-        error.textContent = 'No hay una regla de partición disponible para este formato.';
+        error.textContent = getLocalizedText(structure.commonText.noPartitionRuleAvailable);
         return;
       }
 
       resetSelectOptions(
         ruleSelect,
-        rules.length === 1 ? '--' : 'Elegí una regla de partición'
+        rules.length === 1 ? '--' : getLocalizedText(structure.commonText.choosePartitionRule)
       );
 
       rules.forEach((rule) => {
@@ -2782,9 +2767,9 @@ function setupCourtPartitionRuleOptions(
     } catch (loadError) {
       if (version !== loadVersion) return;
 
-      resetSelectOptions(ruleSelect, 'No se pudieron cargar las reglas');
+      resetSelectOptions(ruleSelect, getLocalizedText(structure.commonText.partitionRulesLoadFailedShort));
       ruleSelect.disabled = true;
-      error.textContent = 'No se pudieron cargar las reglas de partición.';
+      error.textContent = getLocalizedText(structure.commonText.partitionRulesLoadFailed);
       console.error('Error loading partition rules:', loadError);
     }
   };
@@ -2798,7 +2783,7 @@ function setupCourtPartitionRuleOptions(
 
   applyButton?.addEventListener('click', async () => {
     if (!ruleSelect.value || !record?.id || !record.company_id) {
-      error.textContent = 'Elegí una regla de partición para continuar.';
+      error.textContent = getLocalizedText(structure.commonText.choosePartitionRuleToContinue);
       ruleSelect.classList.add('invalid');
       return;
     }
@@ -2817,7 +2802,7 @@ function setupCourtPartitionRuleOptions(
     }
 
     hideAnyForm();
-    showSuccessMessage('Regla de partición aplicada.');
+    showSuccessMessage(getLocalizedText(structure.commonText.partitionRuleApplied));
     loadTableData('courts');
   });
 
@@ -2834,7 +2819,7 @@ async function setupCourtSportOptions(record?: Partial<TableRecordMap['courts']>
     const selectedSportId = String(record?.sport_id ?? sportSelect.value ?? '');
 
     if (!companySelect.value) {
-      resetSelectOptions(sportSelect, 'Seleccioná una empresa primero');
+      resetSelectOptions(sportSelect, getLocalizedText(structure.commonText.selectCompanyFirst));
       return;
     }
 
@@ -2853,7 +2838,7 @@ async function setupCourtSportOptions(record?: Partial<TableRecordMap['courts']>
       sportSelect,
       availableSports.length > 0
         ? '--'
-        : 'Primero agregá un deporte a la empresa'
+        : getLocalizedText(structure.commonText.addCompanySportFirst)
     );
 
     availableSports.forEach((sport) => {
@@ -2889,7 +2874,12 @@ async function setupCourtPriceSportOptions(
 
   const update = async () => {
     const courtId = courtSelect.value;
-    resetSelectOptions(sportSelect, courtId ? 'Cargando deporte de la cancha...' : 'Seleccioná una cancha primero');
+    resetSelectOptions(
+      sportSelect,
+      courtId
+        ? getLocalizedText(structure.commonText.loadingCourtSport)
+        : getLocalizedText(structure.commonText.selectCourtFirst)
+    );
 
     if (!courtId) return;
 
@@ -2901,7 +2891,7 @@ async function setupCourtPriceSportOptions(
     const sportId = court?.sport_id;
 
     if (sportId == null) {
-      resetSelectOptions(sportSelect, 'La cancha no tiene un deporte asignado');
+      resetSelectOptions(sportSelect, getLocalizedText(structure.commonText.courtNoSport));
       return;
     }
 
@@ -2909,7 +2899,7 @@ async function setupCourtPriceSportOptions(
     const sport = sports.find((row) => String((row as Record<string, unknown>).id) === String(sportId)) as Record<string, unknown> | undefined;
 
     if (!sport) {
-      resetSelectOptions(sportSelect, 'El deporte de la cancha no está disponible');
+      resetSelectOptions(sportSelect, getLocalizedText(structure.commonText.courtSportUnavailable));
       return;
     }
 
@@ -3266,7 +3256,7 @@ async function showAnyForm<K extends TableKey>(
 
       if (!ruleSelect?.value) {
         ruleSelect?.classList.add('invalid');
-        if (ruleError) ruleError.textContent = 'Elegí una regla de partición para continuar.';
+        if (ruleError) ruleError.textContent = getLocalizedText(structure.commonText.choosePartitionRuleToContinue);
         return;
       }
 

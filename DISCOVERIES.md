@@ -427,3 +427,19 @@ that broke `test:db` is already removed — B3).
 - Password changes remain authenticated and require the current password. The
   UI exposes that action in the signed-in user menu rather than introducing an
   unauthenticated reset endpoint.
+
+### F7 — SSOT audit follow-up
+
+- Password strength is now a single backend rule (`auth.isStrongPassword`) used
+  by admin-created users, password changes/resets, and `seed-admin`.
+- Court format labels live in one catalog in `structure.ts`. The frontend and
+  partition rules consume that catalog instead of duplicating format labels.
+- The sport → court-format dependency is declared in
+  `structure.courtFormatsBySport`, so the form behavior follows the shared
+  domain definition.
+- Visible partition/dependency helper text was moved into
+  `structure.commonText`. The frontend now consumes these labels instead of
+  embedding Spanish strings inline.
+- Historical academic migrations were left intact because migrations are
+  forward-only. The final schema is still governed by the later migration that
+  drops students, subjects, and enrollments.

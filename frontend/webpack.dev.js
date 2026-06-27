@@ -8,6 +8,13 @@ export default merge(common, {
     host: "0.0.0.0",
     port: 8080,
     hot: true,
+    client: {
+      overlay: {
+        errors: true,
+        warnings: false,
+        runtimeErrors: false,
+      },
+    },
     historyApiFallback: true,
     proxy: [
       {

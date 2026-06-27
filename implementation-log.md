@@ -381,3 +381,26 @@ COMO:
   la misma política.
 - El alta y el reseteo administrativo generan credenciales utilizables de
   inmediato. La identidad, el hash con `scrypt` y la sesión opaca no cambian.
+
+## 2026-06-25 - Auditoría de directivas y single source of truth
+
+QUE:
+- Se revisó el cumplimiento de las directivas de auth, dominio y SSOT, y se
+  corrigieron duplicaciones activas.
+
+COMO:
+- Se centralizó la regla de contraseña fuerte en `backend/src/auth.ts` con
+  `isStrongPassword`. El alta administrativa, el cambio/reset de contraseña y
+  `seed-admin` usan la misma regla.
+- Se actualizaron defaults y documentación de `ADMIN_PASSWORD` para no sugerir
+  credenciales débiles en instalaciones nuevas.
+- Se consolidó el catálogo de formatos de cancha en `structure.ts`: `courts`,
+  `court_partition_rules` y la UI leen labels desde el mismo origen.
+- Se agregó `structure.courtFormatsBySport` para que la dependencia
+  deporte-formato no viva duplicada en el frontend.
+- Se movieron textos visibles de particiones/dependencias a
+  `structure.commonText`, dejando `frontend/src/app.ts` como consumidor del
+  SSOT.
+- No se editaron migraciones históricas con referencias académicas porque son
+  forward-only; el modelo final sigue eliminando alumnos, materias e
+  inscripciones mediante la migración correspondiente.

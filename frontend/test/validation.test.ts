@@ -25,6 +25,16 @@ test('court forms place sport before the dependent format', () => {
   expect(fields.indexOf('sport_id')).toBeLessThan(fields.indexOf('format'));
 });
 
+test('court sport format dependencies come from the SSOT format catalog', () => {
+  const formatValues = new Set(
+    structure.tables.courts.columns.format.options?.map((option) => option.value)
+  );
+
+  Object.values(structure.courtFormatsBySport).flat().forEach((format) => {
+    expect(formatValues.has(format)).toBe(true);
+  });
+});
+
 test('partition rules use named layout templates before the derived child count', () => {
   const columns = structure.tables.court_partition_rules.columns;
   const fields = Object.keys(columns);
