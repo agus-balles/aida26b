@@ -130,6 +130,58 @@ function addMinutes(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60 * 1000);
 }
 
+// Reservable window of the day, expressed in each company's local time.
+const OPEN_HOUR = 8;
+const CLOSE_HOUR = 23;
+
+/** Offset (ms) between UTC and `timeZone` at the given instant. */
+function timeZoneOffsetMs(date: Date, timeZone: string): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  const parts: Record<string, number> = {};
+  for (const part of dtf.formatToParts(date)) {
+    if (part.type !== 'literal') parts[part.type] = Number(part.value);
+  }
+
+  // en-US renders midnight as hour 24; normalise to 0.
+  const hour = parts.hour === 24 ? 0 : parts.hour;
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, hour, parts.minute, parts.second);
+  return asUtc - date.getTime();
+}
+
+/** UTC instant for a wall-clock time interpreted in `timeZone`. */
+function zonedWallClockToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const offset = timeZoneOffsetMs(new Date(utcGuess), timeZone);
+  return new Date(utcGuess - offset);
+}
+
+/** Local calendar date (YYYY-MM-DD) of an instant in `timeZone`. */
+function zonedDateKey(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
 function overlaps(startA: Date, endA: Date, startB: Date, endB: Date): boolean {
   return startA < endB && endA > startB;
 }
@@ -598,19 +650,28 @@ export function applyCourtPartitionRule(pool: Pool) {
   };
 }
 
-function dateWindow(date: string): { start: Date; end: Date } {
+function parseDateParts(date: string): [number, number, number] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new HttpError(400, { error: 'Elegí una fecha válida.' });
   }
+  const [year, month, day] = date.split('-').map(Number);
+  return [year, month, day];
+}
 
-  const start = new Date(`${date}T00:00:00.000Z`);
+function dateWindow(date: string, timeZone: string): { start: Date; end: Date } {
+  const [year, month, day] = parseDateParts(date);
+  const start = zonedWallClockToUtc(year, month, day, 0, 0, timeZone);
   return { start, end: addMinutes(start, 24 * 60) };
 }
 
-function buildSlots(date: string, durationMinutes: number): Array<{ startsAt: Date; endsAt: Date }> {
-  const { start } = dateWindow(date);
-  const first = addMinutes(start, 8 * 60);
-  const dayEnd = addMinutes(start, 23 * 60);
+function buildSlots(
+  date: string,
+  durationMinutes: number,
+  timeZone: string
+): Array<{ startsAt: Date; endsAt: Date }> {
+  const [year, month, day] = parseDateParts(date);
+  const first = zonedWallClockToUtc(year, month, day, OPEN_HOUR, 0, timeZone);
+  const dayEnd = zonedWallClockToUtc(year, month, day, CLOSE_HOUR, 0, timeZone);
   const slots: Array<{ startsAt: Date; endsAt: Date }> = [];
 
   for (let startsAt = first; addMinutes(startsAt, durationMinutes) <= dayEnd; startsAt = addMinutes(startsAt, durationMinutes)) {
@@ -679,7 +740,12 @@ function statusForSlot(
   return 'available';
 }
 
-async function fetchPrices(queryable: Queryable, courtIds: number[], sportId: number) {
+async function fetchPrices(
+  queryable: Queryable,
+  courtIds: number[],
+  sportId: number,
+  onDate: string
+) {
   if (courtIds.length === 0) return new Map<number, { price: number; currency: string }>();
 
   const result = await queryable.query<{
@@ -695,10 +761,10 @@ async function fetchPrices(queryable: Queryable, courtIds: number[], sportId: nu
      WHERE court_id = ANY($1::bigint[])
        AND sport_id = $2
        AND is_active = true
-       AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)
-       AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+       AND (valid_from IS NULL OR valid_from <= $3::date)
+       AND (valid_to IS NULL OR valid_to >= $3::date)
      ORDER BY court_id, valid_from DESC NULLS LAST, id DESC`,
-    [courtIds, sportId]
+    [courtIds, sportId, onDate]
   );
 
   return new Map(
@@ -714,7 +780,7 @@ function priceForCourt(
   courts: CourtRow[],
   prices: Map<number, { price: number; currency: string }>,
   durationMinutes: number
-) {
+): { price_total: number; currency: string } | null {
   let current: CourtRow | undefined = court;
 
   while (current) {
@@ -731,7 +797,7 @@ function priceForCourt(
       : undefined;
   }
 
-  return { price_total: 0, currency: 'ARS' };
+  return null;
 }
 
 export function getCompanyAvailability(pool: Pool) {
@@ -746,7 +812,6 @@ export function getCompanyAvailability(pool: Pool) {
       await expireHeldBookings(pool);
       await validateTimeBlock(pool, companyId, durationMinutes);
 
-      const { start: dayStart, end: dayEnd } = dateWindow(date);
       const company = await pool.query(
         'SELECT id, name, city, timezone FROM companies WHERE id = $1 AND is_active = true',
         [companyId]
@@ -755,6 +820,9 @@ export function getCompanyAvailability(pool: Pool) {
       if (company.rowCount === 0) {
         throw new HttpError(404, { error: 'La empresa seleccionada no está disponible.' });
       }
+
+      const timeZone = company.rows[0].timezone || 'UTC';
+      const { start: dayStart, end: dayEnd } = dateWindow(date, timeZone);
 
       const courtResult = await pool.query<CourtRow>(
         `SELECT *
@@ -766,9 +834,9 @@ export function getCompanyAvailability(pool: Pool) {
       );
       const allCourts = courtResult.rows.map(normalizeCourtRow);
       const courts = allCourts.filter((court) => court.sport_id === sportId);
-      const prices = await fetchPrices(pool, courts.map((court) => court.id), sportId);
+      const prices = await fetchPrices(pool, courts.map((court) => court.id), sportId, date);
       const locks = await fetchDayLocks(pool, companyId, dayStart, dayEnd);
-      const slots = buildSlots(date, durationMinutes);
+      const slots = buildSlots(date, durationMinutes, timeZone);
 
       return res.json({
         company: company.rows[0],
@@ -789,7 +857,8 @@ export function getCompanyAvailability(pool: Pool) {
             const alternatives = status === 'available'
               ? findCompactionAlternatives(allCourts, lockedIds, court.id)
               : [];
-            const price = priceForCourt(court, allCourts, prices, durationMinutes);
+            const price = priceForCourt(court, allCourts, prices, durationMinutes)
+              ?? { price_total: 0, currency: 'ARS' };
 
             return {
               starts_at: slot.startsAt.toISOString(),
@@ -805,6 +874,19 @@ export function getCompanyAvailability(pool: Pool) {
       return sendReservationError(res, error, 'Error loading availability');
     }
   };
+}
+
+async function fetchCompanyTimeZone(queryable: Queryable, companyId: number): Promise<string> {
+  const result = await queryable.query<{ timezone: string }>(
+    'SELECT timezone FROM companies WHERE id = $1 AND is_active = true',
+    [companyId]
+  );
+
+  if (result.rowCount === 0) {
+    throw new HttpError(404, { error: 'La empresa seleccionada no está disponible.' });
+  }
+
+  return result.rows[0].timezone || 'UTC';
 }
 
 async function fetchSelectedCourt(
@@ -875,6 +957,18 @@ export function holdBooking(pool: Pool) {
       await expireHeldBookings(client);
       await validateTimeBlock(client, companyId, durationMinutes);
 
+      // Constrain starts_at to the company's slot grid (local time). Besides
+      // rejecting arbitrary times, this keeps every booking inside a single
+      // local day, so two overlapping holds on the same court always share the
+      // advisory-lock key and serialise even if btree_gist is unavailable.
+      const timeZone = await fetchCompanyTimeZone(client, companyId);
+      const localDate = zonedDateKey(startsAt, timeZone);
+      const gridSlots = buildSlots(localDate, durationMinutes, timeZone);
+
+      if (!gridSlots.some((slot) => slot.startsAt.getTime() === startsAt.getTime())) {
+        throw new HttpError(400, { error: 'El horario elegido no está disponible para reservar.' });
+      }
+
       const court = await fetchSelectedCourt(client, companyId, courtId, sportId);
       const rootCourtId = court.root_court_id ?? court.id;
 
@@ -901,8 +995,15 @@ export function holdBooking(pool: Pool) {
         });
       }
 
-      const prices = await fetchPrices(client, courts.map((candidate) => candidate.id), sportId);
+      const prices = await fetchPrices(client, courts.map((candidate) => candidate.id), sportId, localDate);
       const price = priceForCourt(court, courts, prices, durationMinutes);
+
+      if (!price) {
+        throw new HttpError(400, {
+          error: 'La cancha elegida no tiene un precio configurado para ese deporte.',
+        });
+      }
+
       const createdBy = (req as AuthedRequest).user?.id ?? null;
 
       const booking = await client.query(
@@ -1040,6 +1141,33 @@ export function cancelBooking(pool: Pool) {
       return sendReservationError(res, error, 'Error cancelling booking');
     } finally {
       client.release();
+    }
+  };
+}
+
+export function listCompanyBookings(pool: Pool) {
+  return async (req: Request, res: Response) => {
+    try {
+      const companyId = readPositiveInteger(req.params.companyId, 'companyId');
+      await requireCompanyAccess(pool, req, companyId, false);
+      await expireHeldBookings(pool);
+
+      const result = await pool.query(
+        `SELECT b.id, b.court_id, c.name AS court_name, b.sport_id,
+                b.starts_at, b.ends_at, b.status, b.customer_name,
+                b.customer_email, b.customer_phone, b.price_total, b.currency,
+                b.hold_expires_at, b.created_at
+         FROM bookings b
+         JOIN courts c ON c.id = b.court_id
+         WHERE b.company_id = $1
+           AND b.status IN ('held', 'confirmed')
+         ORDER BY b.starts_at`,
+        [companyId]
+      );
+
+      return res.json({ data: result.rows });
+    } catch (error) {
+      return sendReservationError(res, error, 'Error listing bookings');
     }
   };
 }

@@ -4,6 +4,7 @@ import {
   decideCompanyScopeAccess,
   getCompanyReadConstraint,
   resolveCompanyScope,
+  resolveDestinationCompanyScope,
 } from '../src/companyAccess';
 
 const admin = { id: 1, username: 'a', email: null, role: 'admin', is_active: true, must_change_password: false } as const;
@@ -73,6 +74,37 @@ test('resolveCompanyScope resolves company via court for court_prices', async ()
   } as never;
   const scope = await resolveCompanyScope(db, 'court_prices', 'POST', { court_id: 42 }, {});
   assert.deepEqual(scope, { kind: 'company', companyId: 5 });
+});
+
+test('resolveDestinationCompanyScope reads the target company for a courts PUT', async () => {
+  const scope = await resolveDestinationCompanyScope(noopDb, 'courts', { company_id: 9 });
+  assert.deepEqual(scope, { kind: 'company', companyId: 9 });
+});
+
+test('resolveDestinationCompanyScope resolves the target court owner for court_prices', async () => {
+  const db = {
+    query: async (_sql: string, params: unknown[]) => {
+      assert.deepEqual(params, [42]);
+      return { rows: [{ company_id: 8 }] };
+    },
+  } as never;
+  const scope = await resolveDestinationCompanyScope(db, 'court_prices', { court_id: 42 });
+  assert.deepEqual(scope, { kind: 'company', companyId: 8 });
+});
+
+test('resolveDestinationCompanyScope ignores tables without a body scoping FK', async () => {
+  assert.equal(await resolveDestinationCompanyScope(noopDb, 'companies', { id: 1 }), null);
+  assert.equal(await resolveDestinationCompanyScope(noopDb, 'sports', { name: 'x' }), null);
+});
+
+test('moving a row into another company is denied unless linked to the target', () => {
+  // A staff user of company 1 cannot reassign a row to company 2 (the
+  // destination scope must also be authorised, not only the source).
+  const links = [{ company_id: 1, role: 'staff' }];
+  assert.equal(
+    decideCompanyScopeAccess(editor, links, { kind: 'company', companyId: 2 }),
+    false
+  );
 });
 
 test('company-scoped reads add an ownership condition', () => {

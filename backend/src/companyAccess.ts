@@ -159,6 +159,45 @@ export async function resolveCompanyScope(
   }
 }
 
+/**
+ * Resolve the DESTINATION company a write would move a row to, based on the
+ * scoping FK carried in the request body (not the row's current owner).
+ *
+ * `resolveCompanyScope` answers "who owns the row today"; on a PUT that changes
+ * `company_id`/`court_id` that is the *source*. Without this, a user with access
+ * to company A could PUT their own `courts`/`court_prices`/`company_time_blocks`
+ * row pointing at company B (e.g. re-parent a price to B's court and set
+ * `price_per_hour = 0`). Returning the target scope lets the caller require
+ * write access to it too. Returns null when the table has no reassignable
+ * scoping FK in the body (no extra check needed).
+ */
+export async function resolveDestinationCompanyScope(
+  queryable: Queryable,
+  tableName: string,
+  body: Record<string, unknown>
+): Promise<CompanyScope | null> {
+  switch (tableName) {
+    case 'courts':
+    case 'company_time_blocks': {
+      const companyId = numericParam(body.company_id);
+      return companyId === null ? null : { kind: 'company', companyId };
+    }
+
+    case 'court_prices': {
+      const courtId = numericParam(body.court_id);
+      if (courtId === null) return null;
+      return companyOfRow(
+        queryable,
+        'SELECT company_id FROM courts WHERE id = $1',
+        courtId
+      );
+    }
+
+    default:
+      return null;
+  }
+}
+
 export async function fetchUserCompanyLinks(
   queryable: Queryable,
   userId: number
@@ -236,16 +275,28 @@ export async function enforceCompanyScope(
 
   try {
     const links = await fetchUserCompanyLinks(pool, user.id);
+    const body = (req.body ?? {}) as Record<string, unknown>;
 
     const scope = await resolveCompanyScope(
       pool,
       tableName,
       req.method,
-      (req.body ?? {}) as Record<string, unknown>,
+      body,
       (req.query ?? {}) as Record<string, unknown>
     );
 
-    if (decideCompanyScopeAccess(user, links, scope)) return true;
+    // A PUT can reassign a row's scoping FK to another company. Require write
+    // access to the *target* company too, not only the row's current owner.
+    const destination =
+      req.method === 'PUT'
+        ? await resolveDestinationCompanyScope(pool, tableName, body)
+        : null;
+
+    const sourceOk = decideCompanyScopeAccess(user, links, scope);
+    const destinationOk =
+      destination === null || decideCompanyScopeAccess(user, links, destination);
+
+    if (sourceOk && destinationOk) return true;
   } catch (error) {
     console.error('Error verifying company scope:', error);
     res

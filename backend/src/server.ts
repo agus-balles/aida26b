@@ -14,6 +14,7 @@ import {
   createCourtWithPartitions,
   getCompanyAvailability,
   holdBooking,
+  listCompanyBookings,
 } from './reservations';
 
 import { getHandler } from './routes/get';
@@ -701,6 +702,12 @@ app.post(
 app.get(
   '/api/companies/:companyId/availability',
   getCompanyAvailability(pool)
+);
+
+app.get(
+  '/api/companies/:companyId/bookings',
+  requireAuth,
+  listCompanyBookings(pool)
 );
 
 app.post(
