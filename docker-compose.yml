@@ -66,6 +66,13 @@ services:
       - aida26_network
     environment:
       - API_URL=http://backend:3000
+    # Mount sources so the webpack dev server recompiles on host edits (and so a
+    # stale Docker build cache can never serve outdated code). Mirrors backend.
+    volumes:
+      - ./frontend/src:/app/frontend/src
+      - ./frontend/styles:/app/frontend/styles
+      - ./frontend/index.html:/app/frontend/index.html
+      - ./shared/src:/app/shared/src
 
 volumes:
   postgres_data:
