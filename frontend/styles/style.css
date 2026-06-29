@@ -144,6 +144,30 @@ textarea:focus-visible {
     background: var(--primary-soft);
 }
 
+.header-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.login-nav-btn {
+    border-color: var(--primary);
+    background: transparent;
+    color: var(--primary);
+}
+
+/* The base `button { display: inline-flex }` rule (author origin) overrides the
+   UA `[hidden]` rule, so the hidden attribute alone would not hide the button. */
+.login-nav-btn[hidden] {
+    display: none;
+}
+
+.login-nav-btn:hover:not(:disabled) {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+
 .brand-mark {
     position: relative;
     width: 32px;
@@ -841,12 +865,48 @@ tbody tr:last-child td {
 }
 
 .court-tile[data-status="compaction_blocked"],
-.slot-btn[data-status="compaction_blocked"],
+.slot-btn[data-status="compaction_blocked"] {
+    border-color: #d98c2b;
+    background: #fdebd0;
+    color: var(--text);
+}
+
 .court-tile[data-status="unavailable"],
 .slot-btn[data-status="unavailable"] {
     border-color: var(--border-strong);
     background: var(--surface-strong);
     color: var(--text-muted);
+}
+
+.slot-alternatives {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 0 8px;
+}
+
+.slot-alternatives-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.alt-court-chip {
+    width: auto;
+    padding: 3px 10px;
+    border: 1px solid #d98c2b;
+    border-radius: 999px;
+    background: #fdebd0;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.alt-court-chip:hover {
+    border-color: var(--primary);
+    background: var(--primary-soft);
 }
 
 .booking-form {
@@ -862,6 +922,65 @@ tbody tr:last-child td {
     color: var(--success);
     font-size: 14px;
     font-weight: 680;
+}
+
+.operator-bookings {
+    margin-top: 16px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.operator-bookings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.operator-bookings-header h3 {
+    margin: 0;
+}
+
+.operator-bookings-empty {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.operator-bookings-table {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.operator-bookings-table table {
+    min-width: 560px;
+}
+
+.operator-bookings .confirm-btn {
+    border-color: var(--success);
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.operator-bookings .confirm-btn:hover:not(:disabled) {
+    border-color: var(--success);
+    background: var(--success-soft);
+}
+
+.operator-bookings .cancel-btn {
+    border-color: transparent;
+    background: transparent;
+    color: var(--danger);
+}
+
+.operator-bookings .cancel-btn:hover:not(:disabled) {
+    border-color: var(--danger);
+    background: var(--danger-soft);
 }
 
 .company-permissions-output {

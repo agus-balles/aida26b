@@ -70,6 +70,23 @@ type AvailabilityResponse = {
   courts: AvailabilityCourt[];
 };
 
+type Booking = {
+  id: number;
+  court_id: number;
+  court_name: string;
+  sport_id: number;
+  starts_at: string;
+  ends_at: string;
+  status: 'held' | 'confirmed';
+  customer_name: string;
+  customer_email: string | null;
+  customer_phone: string | null;
+  price_total: string | number;
+  currency: string;
+  hold_expires_at: string | null;
+  created_at: string;
+};
+
 type PartitionLayoutRect = {
   x: number;
   y: number;
@@ -123,6 +140,7 @@ const currentUserEl = document.getElementById('current-user') as HTMLElement;
 const changePasswordBtn = document.getElementById('change-password-btn') as HTMLButtonElement;
 const logoutBtn = document.getElementById('logout-btn') as HTMLButtonElement;
 const homeBtn = document.getElementById('home-btn') as HTMLButtonElement;
+const loginNavBtn = document.getElementById('login-nav-btn') as HTMLButtonElement;
 const statusMessage = document.getElementById('status-message') as HTMLElement;
 
 const viewTitle = document.getElementById('view-title') as HTMLElement;
@@ -186,15 +204,33 @@ function setMessage(message = ''): void {
   statusMessage.hidden = !message;
 }
 
+// Default logged-out landing: only the public "Reservar cancha" widget.
+function showPublicLanding(): void {
+  currentUser = null;
+  currentCompanyLinks = [];
+
+  authSection.style.display = 'none';
+  passwordSection.style.display = 'none';
+  publicBookingSection.style.display = 'block';
+  appShell.style.display = 'none';
+  permissionsNavButton?.setAttribute('hidden', '');
+
+  loginError.hidden = true;
+  loginNavBtn.hidden = false;
+}
+
+// Dedicated login view: only the login form, reached from the header button.
 function showLogin(message = ''): void {
   currentUser = null;
   currentCompanyLinks = [];
 
   authSection.style.display = 'block';
   passwordSection.style.display = 'none';
-  publicBookingSection.style.display = 'block';
+  publicBookingSection.style.display = 'none';
   appShell.style.display = 'none';
   permissionsNavButton?.setAttribute('hidden', '');
+
+  loginNavBtn.hidden = true;
 
   loginError.textContent = message;
   loginError.hidden = !message;
@@ -208,6 +244,7 @@ function showPasswordChange(user: AuthUser, companyLinks: CompanyLink[]): void {
   passwordSection.style.display = 'block';
   publicBookingSection.style.display = 'none';
   appShell.style.display = 'none';
+  loginNavBtn.hidden = true;
 
   passwordError.hidden = true;
 }
@@ -216,7 +253,7 @@ function goHome(): void {
   hideAnyForm();
 
   if (passwordSection.style.display !== 'none') {
-    showLogin();
+    showPublicLanding();
     return;
   }
 
@@ -226,10 +263,15 @@ function goHome(): void {
     return;
   }
 
-  showLogin();
+  showPublicLanding();
 }
 
 function showApp(user: AuthUser, companyLinks: CompanyLink[] = []): void {
+  if (user.must_change_password) {
+    showPasswordChange(user, companyLinks);
+    return;
+  }
+
   currentUser = user;
   currentCompanyLinks = companyLinks;
 
@@ -237,6 +279,7 @@ function showApp(user: AuthUser, companyLinks: CompanyLink[] = []): void {
   passwordSection.style.display = 'none';
   publicBookingSection.style.display = 'none';
   appShell.style.display = 'block';
+  loginNavBtn.hidden = true;
 
   if (permissionsNavButton) {
     permissionsNavButton.hidden = user.role !== 'admin';
@@ -312,13 +355,13 @@ function showErrorMessage(message: string): void {
   dialog.classList.add('dialogErrorMessage');
 
   const dialogTitle = document.createElement('h1');
-  dialogTitle.textContent = 'Error';
+  dialogTitle.textContent = getLocalizedText(structure.commonText.error);
 
   const dialogMessage = document.createElement('p');
   dialogMessage.textContent = message;
 
   const closeButton = document.createElement('button');
-  closeButton.textContent = 'Aceptar';
+  closeButton.textContent = getLocalizedText(structure.commonText.accept);
   closeButton.addEventListener('click', () => {
     dialog.close();
     dialog.remove();
@@ -635,6 +678,7 @@ function applyStaticLanguageToUI(): void {
   setLocalizedElementText('change-password-btn', structure.commonText.changePassword);
   setLocalizedElementText('logout-btn', structure.commonText.logout);
   setLocalizedElementText('home-btn', structure.commonText.home);
+  setLocalizedElementText('login-nav-btn', structure.commonText.signIn);
 }
 
 function updateNavButtonsText(): void {
@@ -909,9 +953,16 @@ function renderCourtsTable(
   tbody.innerHTML = '';
 
   const headerRow = document.createElement('tr');
-  ['Cancha', 'Empresa', 'Deporte', 'Formato', 'Estado', 'Subcanchas'].forEach((label) => {
+  [
+    structure.commonText.court,
+    structure.commonText.company,
+    structure.commonText.sport,
+    structure.commonText.format,
+    structure.commonText.state,
+    structure.commonText.subcourts,
+  ].forEach((label) => {
     const th = document.createElement('th');
-    th.textContent = label;
+    th.textContent = getLocalizedText(label);
     headerRow.appendChild(th);
   });
   if (showActions) {
@@ -939,7 +990,10 @@ function renderCourtsTable(
       toggle.type = 'button';
       toggle.className = 'court-tree-toggle';
       toggle.textContent = '▸';
-      toggle.setAttribute('aria-label', `Mostrar subcanchas de ${String(record.name)}`);
+      toggle.setAttribute(
+        'aria-label',
+        `${getLocalizedText(structure.commonText.showChildCourtsOf)} ${String(record.name)}`
+      );
       toggle.setAttribute('aria-expanded', 'false');
       toggle.addEventListener('click', () => {
         const expanded = !expandedRoots.has(rootId);
@@ -973,15 +1027,21 @@ function renderCourtsTable(
 
     const stateCell = document.createElement('td');
     const parent = record.parent_court_id == null
-      ? 'Cancha principal'
-      : `Subcancha de ${String(recordsById.get(String(record.parent_court_id))?.name ?? 'cancha principal')}`;
-    stateCell.textContent = `${parent}. ${isAffirmative(record.is_partitionable) ? 'Particionable' : 'No particionable'}. ${isAffirmative(record.is_active) ? 'Activa' : 'Inactiva'}.`;
+      ? getLocalizedText(structure.commonText.mainCourt)
+      : `${getLocalizedText(structure.commonText.childCourtOf)} ${String(recordsById.get(String(record.parent_court_id))?.name ?? getLocalizedText(structure.commonText.mainCourt))}`;
+    const partition = isAffirmative(record.is_partitionable)
+      ? getLocalizedText(structure.commonText.partitionable)
+      : getLocalizedText(structure.commonText.notPartitionable);
+    const activeState = isAffirmative(record.is_active)
+      ? getLocalizedText(structure.commonText.active)
+      : getLocalizedText(structure.commonText.inactive);
+    stateCell.textContent = `${parent}. ${partition}. ${activeState}.`;
     row.appendChild(stateCell);
 
     const childrenCell = document.createElement('td');
     childrenCell.textContent = children.length === 0
-      ? 'Sin subcanchas'
-      : `${children.length} subcancha${children.length === 1 ? '' : 's'}`;
+      ? getLocalizedText(structure.commonText.noChildCourts)
+      : `${children.length} ${getLocalizedText(children.length === 1 ? structure.commonText.childCourt : structure.commonText.childCourts)}`;
     row.appendChild(childrenCell);
 
     if (showActions) {
@@ -1100,7 +1160,7 @@ function renderAnyTable<K extends TableKey>(
 
     th.textContent = getLocalizedText(column.label as LocalizedText | string) || fieldName;
     th.className = 'sortable';
-    th.title = 'Click to sort';
+    th.title = getLocalizedText(structure.commonText.clickToSort);
 
     if (currentState.sort === fieldName) {
       th.classList.add(currentState.dir === 'desc' ? 'sorted-desc' : 'sorted-asc');
@@ -1413,14 +1473,48 @@ async function renderAvailabilityControls(
   container.appendChild(form);
   container.appendChild(output);
 
+  const bookingsPanel = operatorCanConfirm ? document.createElement('div') : null;
+  if (bookingsPanel) {
+    bookingsPanel.className = 'operator-bookings';
+    container.appendChild(bookingsPanel);
+  }
+
+  const reloadMap = (): Promise<void> =>
+    loadAvailability(
+      companySelect,
+      sportSelect,
+      dateInput,
+      durationSelect,
+      output,
+      operatorCanConfirm
+    );
+
+  const reloadBookings = async (): Promise<void> => {
+    if (bookingsPanel && companySelect.value) {
+      await renderOperatorBookings(bookingsPanel, Number(companySelect.value), reloadMap);
+    }
+  };
+
   try {
     const companies = await fetchRows('/public/companies');
 
     fillSelect(companySelect, companies, 'id', 'name');
+
+    // A company operator (non-admin) defaults to their own company, so the map
+    // and bookings panel load their data instead of an arbitrary first company
+    // they may not be allowed to manage.
+    if (operatorCanConfirm && currentUser?.role !== 'admin' && currentCompanyLinks.length > 0) {
+      const ownCompanyId = String(currentCompanyLinks[0].company_id);
+      if (Array.from(companySelect.options).some((option) => option.value === ownCompanyId)) {
+        companySelect.value = ownCompanyId;
+      }
+    }
+
     await loadAvailabilityOptions(companySelect, sportSelect, durationSelect);
 
     companySelect.addEventListener('change', async () => {
       await loadAvailabilityOptions(companySelect, sportSelect, durationSelect);
+      await reloadBookings();
     });
 
     form.addEventListener('submit', async (event) => {
@@ -1433,6 +1527,7 @@ async function renderAvailabilityControls(
         output,
         operatorCanConfirm
       );
+      await reloadBookings();
     });
 
     if (companySelect.value && sportSelect.value && durationSelect.value) {
@@ -1445,10 +1540,171 @@ async function renderAvailabilityControls(
         operatorCanConfirm
       );
     }
+
+    await reloadBookings();
   } catch (error) {
     output.textContent = getLocalizedText(structure.commonText.errorLoadingData);
     console.error('Error loading availability controls:', error);
   }
+}
+
+async function renderOperatorBookings(
+  panel: HTMLElement,
+  companyId: number,
+  refreshMap: () => Promise<void>
+): Promise<void> {
+  panel.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.className = 'operator-bookings-header';
+
+  const heading = document.createElement('h3');
+  heading.textContent = getLocalizedText(structure.commonText.companyBookings);
+  header.appendChild(heading);
+
+  const refreshBtn = document.createElement('button');
+  refreshBtn.type = 'button';
+  refreshBtn.className = 'operator-bookings-refresh';
+  refreshBtn.textContent = getLocalizedText(structure.commonText.refreshBookings);
+  refreshBtn.addEventListener('click', () => {
+    void renderOperatorBookings(panel, companyId, refreshMap);
+  });
+  header.appendChild(refreshBtn);
+
+  panel.appendChild(header);
+
+  let bookings: Booking[] = [];
+  try {
+    const response = await apiFetch(`/companies/${companyId}/bookings`);
+
+    if (!response.ok) {
+      throw new Error(await errorMessage(response));
+    }
+
+    const result = (await response.json()) as { data?: Booking[] };
+    bookings = result.data ?? [];
+  } catch (error) {
+    const message = document.createElement('p');
+    message.className = 'operator-bookings-empty';
+    message.textContent = getLocalizedText(structure.commonText.errorLoadingData);
+    panel.appendChild(message);
+    console.error('Error loading company bookings:', error);
+    return;
+  }
+
+  if (bookings.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'operator-bookings-empty';
+    empty.textContent = getLocalizedText(structure.commonText.noBookings);
+    panel.appendChild(empty);
+    return;
+  }
+
+  const reload = async (): Promise<void> => {
+    await refreshMap();
+    await renderOperatorBookings(panel, companyId, refreshMap);
+  };
+
+  const surface = document.createElement('div');
+  surface.className = 'operator-bookings-table';
+
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+
+  [
+    structure.commonText.court,
+    structure.commonText.schedule,
+    structure.commonText.customer,
+    structure.commonText.status,
+    structure.commonText.price,
+    structure.commonText.actions,
+  ].forEach((label) => {
+    const th = document.createElement('th');
+    th.textContent = getLocalizedText(label);
+    headerRow.appendChild(th);
+  });
+
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+
+  bookings.forEach((booking) => {
+    const row = document.createElement('tr');
+
+    const courtCell = document.createElement('td');
+    courtCell.textContent = booking.court_name;
+
+    const scheduleCell = document.createElement('td');
+    scheduleCell.textContent = `${formatSlotTime(booking.starts_at)} - ${formatSlotTime(booking.ends_at)}`;
+
+    const customerCell = document.createElement('td');
+    customerCell.textContent = booking.customer_name;
+
+    const statusCell = document.createElement('td');
+    statusCell.textContent = getLocalizedText(
+      booking.status === 'held'
+        ? structure.commonText.bookingStatusHeld
+        : structure.commonText.bookingStatusConfirmed
+    );
+
+    const priceCell = document.createElement('td');
+    priceCell.textContent = `${booking.price_total} ${booking.currency}`;
+
+    const actionsCell = document.createElement('td');
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    if (booking.status === 'held') {
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.className = 'confirm-btn';
+      confirmBtn.textContent = getLocalizedText(structure.commonText.confirm);
+      confirmBtn.addEventListener('click', async () => {
+        const response = await apiFetch(`/bookings/${booking.id}/confirm`, { method: 'POST' });
+
+        if (!response.ok) {
+          return showErrorMessage(await errorMessage(response));
+        }
+
+        setMessage(getLocalizedText(structure.commonText.bookingConfirmed));
+        await reload();
+      });
+      actions.appendChild(confirmBtn);
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'cancel-btn';
+    cancelBtn.textContent = getLocalizedText(structure.commonText.cancel);
+    cancelBtn.addEventListener('click', async () => {
+      const response = await apiFetch(`/bookings/${booking.id}/cancel`, { method: 'POST' });
+
+      if (!response.ok) {
+        return showErrorMessage(await errorMessage(response));
+      }
+
+      await reload();
+    });
+    actions.appendChild(cancelBtn);
+
+    actionsCell.appendChild(actions);
+
+    appendChildren(row, [
+      courtCell,
+      scheduleCell,
+      customerCell,
+      statusCell,
+      priceCell,
+      actionsCell,
+    ]);
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+  surface.appendChild(table);
+  panel.appendChild(surface);
 }
 
 function appendAvailabilityControl(
@@ -1514,6 +1770,14 @@ async function loadAvailability(
   );
 }
 
+function aggregateCourtStatus(slots: AvailabilitySlot[]): AvailabilityStatus {
+  if (slots.some((slot) => slot.status === 'available')) return 'available';
+  if (slots.some((slot) => slot.status === 'compaction_blocked')) return 'compaction_blocked';
+  if (slots.some((slot) => slot.status === 'held')) return 'held';
+  if (slots.some((slot) => slot.status === 'confirmed')) return 'confirmed';
+  return 'unavailable';
+}
+
 function renderAvailabilityMap(
   data: AvailabilityResponse,
   sportId: number,
@@ -1546,11 +1810,10 @@ function renderAvailabilityMap(
 
     data.courts.forEach((court) => {
       const button = document.createElement('button');
-      const firstSlot = court.slots[0];
 
       button.type = 'button';
       button.className = 'court-tile';
-      button.dataset.status = firstSlot?.status ?? 'unavailable';
+      button.dataset.status = aggregateCourtStatus(court.slots);
       button.classList.toggle('selected', court.id === selectedCourtId);
       button.style.left = `${Number(court.layout_x) * 100}%`;
       button.style.top = `${Number(court.layout_y) * 100}%`;
@@ -1595,6 +1858,34 @@ function renderAvailabilityMap(
       });
 
       slotsPanel.appendChild(button);
+
+      if (slot.status === 'compaction_blocked' && slot.alternatives.length > 0) {
+        const suggestions = document.createElement('div');
+        suggestions.className = 'slot-alternatives';
+
+        const suggestionsLabel = document.createElement('span');
+        suggestionsLabel.className = 'slot-alternatives-label';
+        suggestionsLabel.textContent = `${getLocalizedText(structure.commonText.suggestedCourts)}:`;
+        suggestions.appendChild(suggestionsLabel);
+
+        slot.alternatives.forEach((alternativeId) => {
+          const alternativeCourt = data.courts.find((candidate) => candidate.id === alternativeId);
+
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'alt-court-chip';
+          chip.textContent = alternativeCourt?.name ?? String(alternativeId);
+          chip.addEventListener('click', () => {
+            selectedCourtId = alternativeId;
+            draw();
+            map.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          });
+
+          suggestions.appendChild(chip);
+        });
+
+        slotsPanel.appendChild(suggestions);
+      }
     });
   };
 
@@ -1756,8 +2047,8 @@ async function renderPermissionsView(): Promise<void> {
   const userRoleSelect = document.createElement('select');
   userRoleSelect.name = 'role';
   [
-    { value: 'reader', label: structure.commonText.userAccount },
-    { value: 'editor', label: structure.commonText.companyAccount },
+    { value: 'reader', label: structure.commonText.roleReader },
+    { value: 'editor', label: structure.commonText.roleEditor },
   ].forEach((role) => {
     const option = document.createElement('option');
     option.value = role.value;
@@ -2082,22 +2373,24 @@ function createFilterControl(
 function renderFilters<K extends TableKey>(tableKey: K): void {
   filterContainer.innerHTML = '';
 
-  const searchHints: Partial<Record<TableKey, string>> = {
-    courts: 'Buscar por cancha, empresa, deporte, formato o estado',
-    companies: 'Buscar por empresa, ciudad o estado',
-    court_partition_rules: 'Buscar reglas por formato',
-    court_prices: 'Buscar por cancha o deporte',
-    company_time_blocks: 'Buscar por empresa',
+  const searchHints: Partial<Record<TableKey, LocalizedText>> = {
+    courts: structure.commonText.searchHintCourts,
+    companies: structure.commonText.searchHintCompanies,
+    court_partition_rules: structure.commonText.searchHintPartitionRules,
+    court_prices: structure.commonText.searchHintPrices,
+    company_time_blocks: structure.commonText.searchHintTimeBlocks,
   };
   const searchGroup = document.createElement('div');
   searchGroup.className = 'context-search';
   const searchLabel = document.createElement('label');
   searchLabel.htmlFor = 'context-search-input';
-  searchLabel.textContent = 'Buscar';
+  searchLabel.textContent = getLocalizedText(structure.commonText.search);
   const searchInput = document.createElement('input');
   searchInput.id = 'context-search-input';
   searchInput.type = 'search';
-  searchInput.placeholder = searchHints[tableKey] ?? 'Buscar';
+  searchInput.placeholder = getLocalizedText(
+    searchHints[tableKey] ?? structure.commonText.search
+  );
   searchInput.value = currentState.search ?? '';
   let searchTimer: number | undefined;
   searchInput.addEventListener('input', () => {
@@ -2111,7 +2404,6 @@ function renderFilters<K extends TableKey>(tableKey: K): void {
   });
   searchGroup.append(searchLabel, searchInput);
   filterContainer.appendChild(searchGroup);
-  return;
 
   const tableStructure = structure.tables[tableKey];
   const allColumns = Object.entries(tableStructure.columns);
@@ -2410,11 +2702,12 @@ async function renderFormField<K extends TableKey>(
 
   wrapper.appendChild(labelEl);
 
-  await loadDefaultOptions(column);
+  const dynamicOptions = await loadDefaultOptions(column);
+  const renderColumn = dynamicOptions ? { ...column, options: dynamicOptions } : column;
 
   const rendererKey = mapInputToRenderer(column.input);
   const renderer = getRenderer<K>(rendererKey);
-  const inputEl = renderer({ id, fieldName, column, record, isEdit });
+  const inputEl = renderer({ id, fieldName, column: renderColumn, record, isEdit });
 
   wrapper.appendChild(inputEl);
 
@@ -2473,14 +2766,19 @@ function getForeignKeyLabel(row: Record<string, unknown>, foreignKey: ForeignKey
   return String(row[foreignKey.valueField] ?? '');
 }
 
-async function loadDefaultOptions(column: ColumnDef): Promise<void> {
+const defaultOptionsCache = new Map<ColumnDef, ColumnDef['options']>();
+
+async function loadDefaultOptions(column: ColumnDef): Promise<ColumnDef['options']> {
   const foreignKey = column.foreignKey;
 
-  if (!foreignKey || foreignKey.dependsOn) return;
+  if (!foreignKey || foreignKey.dependsOn) return undefined;
 
-  const rows = await fetchRows(`/${foreignKey.table}?page=1`);
+  const cached = defaultOptionsCache.get(column);
+  if (cached) return cached;
 
-  column.options = rows.map((row) => {
+  const rows = await fetchAllRows(foreignKey.table);
+
+  const options = rows.map((row) => {
     const record = row as Record<string, unknown>;
     const value = String(record[foreignKey.valueField] ?? '');
 
@@ -2489,6 +2787,10 @@ async function loadDefaultOptions(column: ColumnDef): Promise<void> {
       label: getForeignKeyLabel(record, foreignKey),
     };
   }) as any;
+
+  defaultOptionsCache.set(column, options);
+
+  return options;
 }
 
 function fillForeignKeySelect(
@@ -2519,8 +2821,8 @@ function setupCompanySelector(
   const search = document.createElement('input');
   search.type = 'search';
   search.className = 'company-select-search';
-  search.placeholder = 'Buscar empresa';
-  search.setAttribute('aria-label', 'Buscar empresa');
+  search.placeholder = getLocalizedText(structure.commonText.searchCompany);
+  search.setAttribute('aria-label', getLocalizedText(structure.commonText.searchCompany));
   select.insertAdjacentElement('beforebegin', search);
 
   let timer: number | undefined;
@@ -3081,7 +3383,7 @@ async function renderCompanySportsManager(
   fieldset.className = 'company-sports-manager';
   fieldset.id = 'company-sports-manager';
   const legend = document.createElement('legend');
-  legend.textContent = 'Deportes habilitados';
+  legend.textContent = getLocalizedText(structure.commonText.enabledSports);
   fieldset.appendChild(legend);
 
   const [sports, links] = await Promise.all([
@@ -3430,11 +3732,13 @@ window.deleteRecord = async <K extends TableKey>(
 // -----------------------------------------------------------------------------
 
 const initialTheme = localStorage.getItem('theme') || 'light';
-document.body.setAttribute('data-theme', initialTheme);
+document.documentElement.setAttribute('data-theme', initialTheme);
 
 applyStaticLanguageToUI();
 
 homeBtn.addEventListener('click', goHome);
+
+loginNavBtn.addEventListener('click', () => showLogin());
 
 changePasswordBtn.addEventListener('click', () => {
   if (currentUser) showPasswordChange(currentUser, currentCompanyLinks);
@@ -3524,7 +3828,7 @@ logoutBtn.addEventListener('click', async () => {
     credentials: 'same-origin',
   });
 
-  showLogin();
+  showPublicLanding();
 });
 
 async function initialize(): Promise<void> {
@@ -3539,7 +3843,7 @@ async function initialize(): Promise<void> {
     });
 
     if (!response.ok) {
-      showLogin();
+      showPublicLanding();
       return;
     }
 
@@ -3550,7 +3854,7 @@ async function initialize(): Promise<void> {
 
     showApp(data.user, data.company_links);
   } catch (error) {
-    showLogin();
+    showPublicLanding();
     console.error('Session check failed:', error);
   }
 }

@@ -611,7 +611,7 @@ export const structure = {
         try {
           if (!value) throw new Error('Theme value is required');
 
-          document.body.setAttribute('data-theme', value);
+          document.documentElement.setAttribute('data-theme', value);
           localStorage.setItem('theme', value);
         } catch (err) {
           console.error('Error changing theme:', err);
@@ -667,6 +667,7 @@ export const structure = {
     home: { es: 'Inicio', en: 'Home' },
     update: { es: 'Actualizar', en: 'Update' },
     login: { es: 'Ingresar', en: 'Login' },
+    signIn: { es: 'Inicia Sesión', en: 'Sign In' },
     password: { es: 'Contraseña', en: 'Password' },
     changePassword: { es: 'Cambiar contraseña', en: 'Change Password' },
     currentPassword: { es: 'Contraseña actual', en: 'Current Password' },
@@ -694,6 +695,17 @@ export const structure = {
       es: 'Tu solicitud quedó retenida. La empresa debe confirmarla antes de que venza.',
       en: 'Your request is on hold. The company must confirm it before it expires.',
     },
+
+    // Operator bookings panel
+    companyBookings: { es: 'Reservas de la empresa', en: 'Company bookings' },
+    refreshBookings: { es: 'Actualizar', en: 'Refresh' },
+    noBookings: { es: 'No hay reservas para esta empresa.', en: 'No bookings for this company.' },
+    schedule: { es: 'Horario', en: 'Time' },
+    customer: { es: 'Cliente', en: 'Customer' },
+    status: { es: 'Estado', en: 'Status' },
+    price: { es: 'Precio', en: 'Price' },
+    bookingStatusHeld: { es: 'Retenida', en: 'Held' },
+    bookingStatusConfirmed: { es: 'Confirmada', en: 'Confirmed' },
     companyPermissions: { es: 'Permisos', en: 'Permissions' },
     createUser: { es: 'Crear usuario', en: 'Create user' },
     userRole: { es: 'Rol', en: 'Role' },
@@ -802,5 +814,59 @@ export const structure = {
       es: '¿Está seguro de que desea eliminar este',
       en: 'Are you sure you want to delete this',
     },
+
+    // Courts table / tree
+    court: { es: 'Cancha', en: 'Court' },
+    format: { es: 'Formato', en: 'Format' },
+    state: { es: 'Estado', en: 'Status' },
+    subcourts: { es: 'Subcanchas', en: 'Child courts' },
+    mainCourt: { es: 'Cancha principal', en: 'Main court' },
+    childCourtOf: { es: 'Subcancha de', en: 'Child court of' },
+    partitionable: { es: 'Particionable', en: 'Partitionable' },
+    notPartitionable: { es: 'No particionable', en: 'Not partitionable' },
+    active: { es: 'Activa', en: 'Active' },
+    inactive: { es: 'Inactiva', en: 'Inactive' },
+    noChildCourts: { es: 'Sin subcanchas', en: 'No child courts' },
+    childCourt: { es: 'subcancha', en: 'child court' },
+    showChildCourtsOf: { es: 'Mostrar subcanchas de', en: 'Show child courts of' },
+
+    // Search / sort
+    search: { es: 'Buscar', en: 'Search' },
+    searchCompany: { es: 'Buscar empresa', en: 'Search company' },
+    clickToSort: { es: 'Clic para ordenar', en: 'Click to sort' },
+    searchHintCourts: {
+      es: 'Buscar por cancha, empresa, deporte, formato o estado',
+      en: 'Search by court, company, sport, format or status',
+    },
+    searchHintCompanies: {
+      es: 'Buscar por empresa, ciudad o estado',
+      en: 'Search by company, city or status',
+    },
+    searchHintPartitionRules: {
+      es: 'Buscar reglas por formato',
+      en: 'Search rules by format',
+    },
+    searchHintPrices: {
+      es: 'Buscar por cancha o deporte',
+      en: 'Search by court or sport',
+    },
+    searchHintTimeBlocks: {
+      es: 'Buscar por empresa',
+      en: 'Search by company',
+    },
+
+    // Availability suggestions
+    suggestedCourts: { es: 'Sugerencias', en: 'Suggestions' },
+
+    // Company sports
+    enabledSports: { es: 'Deportes habilitados', en: 'Enabled sports' },
+
+    // Dialog
+    error: { es: 'Error', en: 'Error' },
+    accept: { es: 'Aceptar', en: 'Accept' },
+
+    // Role labels
+    roleReader: { es: 'Lector', en: 'Reader' },
+    roleEditor: { es: 'Editor', en: 'Editor' },
   } satisfies Record<string, LocalizedText>,
 };

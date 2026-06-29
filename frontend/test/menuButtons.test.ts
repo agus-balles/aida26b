@@ -12,6 +12,7 @@ describe('Menu Pickers (Theme & Language)', () => {
       <div id="password-error"></div>
       <div id="app-shell"></div>
       <span id="current-user"></span>
+      <button id="login-nav-btn" hidden></button>
       <button id="home-btn"></button>
       <button id="change-password-btn"></button>
       <button id="logout-btn"></button>
@@ -58,16 +59,16 @@ describe('Menu Pickers (Theme & Language)', () => {
       expect(themeSelect.tagName).toBe('SELECT');
     });
 
-    test('Theme picker updates document.body data-theme attribute', async () => {
+    test('Theme picker updates document root data-theme attribute', async () => {
       vi.resetModules();
       await import('../src/app');
-      
+
       const themeSelect = document.getElementById('theme-picker') as HTMLSelectElement;
-      
+
       themeSelect.value = 'dark';
       themeSelect.dispatchEvent(new Event('change'));
-      
-      expect(document.body.getAttribute('data-theme')).toBe('dark');
+
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     });
 
     test('Theme picker saves theme to localStorage', async () => {
@@ -178,8 +179,10 @@ describe('Menu Pickers (Theme & Language)', () => {
 
     document.getElementById('home-btn')?.dispatchEvent(new Event('click'));
 
+    // The home button returns to the public landing: the booking widget is
+    // shown and the login form stays hidden (login is now a separate view).
     expect(passwordSection.style.display).toBe('none');
-    expect(authSection.style.display).toBe('block');
+    expect(authSection.style.display).toBe('none');
     expect(publicBooking.style.display).toBe('block');
   });
 
