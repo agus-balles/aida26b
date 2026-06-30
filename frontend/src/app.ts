@@ -72,12 +72,14 @@ type AvailabilityResponse = {
 
 type Booking = {
   id: number;
+  company_id?: number;
+  company_name?: string;
   court_id: number;
   court_name: string;
   sport_id: number;
   starts_at: string;
   ends_at: string;
-  status: 'held' | 'confirmed';
+  status: 'held' | 'confirmed' | 'cancelled' | 'expired';
   customer_name: string;
   customer_email: string | null;
   customer_phone: string | null;
@@ -86,6 +88,8 @@ type Booking = {
   hold_expires_at: string | null;
   created_at: string;
 };
+
+type BookingFilters = { companyId: string; status: string };
 
 type PartitionLayoutRect = {
   x: number;
@@ -972,15 +976,34 @@ function renderCourtsTable(
   }
   thead.appendChild(headerRow);
 
-  const expandedRoots = new Set<string>();
+  const expanded = new Set<string>();
+  const rowByCourtId = new Map<string, HTMLTableRowElement>();
   const rootRecords = records.filter((record) => record.parent_court_id == null);
 
-  const appendCourt = (record: TableRecordMap['courts'], depth: number, rootId: string) => {
+  // A court row is visible only when every ancestor in its chain is expanded,
+  // so collapsing one node hides just its own subtree (not the whole root).
+  const isCourtVisible = (record: TableRecordMap['courts']): boolean => {
+    let parentId: number | null = record.parent_court_id;
+    while (parentId != null) {
+      if (!expanded.has(String(parentId))) return false;
+      parentId = recordsById.get(String(parentId))?.parent_court_id ?? null;
+    }
+    return true;
+  };
+
+  const refreshCourtVisibility = () => {
+    records.forEach((record) => {
+      const row = rowByCourtId.get(String(record.id));
+      if (row) row.hidden = !isCourtVisible(record);
+    });
+  };
+
+  const appendCourt = (record: TableRecordMap['courts'], depth: number) => {
     const children = childrenByParent.get(String(record.id)) ?? [];
     const row = document.createElement('tr');
-    row.dataset.rootCourtId = rootId;
-    row.dataset.courtDepth = String(depth);
-    if (depth > 0 && !expandedRoots.has(rootId)) row.hidden = true;
+    row.dataset.courtId = String(record.id);
+    if (depth > 0) row.hidden = true;
+    rowByCourtId.set(String(record.id), row);
 
     const courtCell = document.createElement('td');
     courtCell.className = 'court-name-cell';
@@ -996,15 +1019,13 @@ function renderCourtsTable(
       );
       toggle.setAttribute('aria-expanded', 'false');
       toggle.addEventListener('click', () => {
-        const expanded = !expandedRoots.has(rootId);
-        if (expanded) expandedRoots.add(rootId);
-        else expandedRoots.delete(rootId);
-        tbody.querySelectorAll<HTMLTableRowElement>(`tr[data-root-court-id="${rootId}"]`).forEach((candidate) => {
-          const candidateDepth = Number(candidate.dataset.courtDepth ?? '0');
-          candidate.hidden = candidateDepth > 0 && !expanded;
-        });
-        toggle.textContent = expanded ? '▾' : '▸';
-        toggle.setAttribute('aria-expanded', String(expanded));
+        const id = String(record.id);
+        const willExpand = !expanded.has(id);
+        if (willExpand) expanded.add(id);
+        else expanded.delete(id);
+        toggle.textContent = willExpand ? '▾' : '▸';
+        toggle.setAttribute('aria-expanded', String(willExpand));
+        refreshCourtVisibility();
       });
       courtCell.appendChild(toggle);
     }
@@ -1063,10 +1084,10 @@ function renderCourtsTable(
     }
 
     tbody.appendChild(row);
-    children.forEach((child) => appendCourt(child, depth + 1, rootId));
+    children.forEach((child) => appendCourt(child, depth + 1));
   };
 
-  rootRecords.forEach((record) => appendCourt(record, 0, String(record.id)));
+  rootRecords.forEach((record) => appendCourt(record, 0));
 }
 
 function canEditTable(tableStructure: TableStructure): boolean {
@@ -1489,9 +1510,10 @@ async function renderAvailabilityControls(
       operatorCanConfirm
     );
 
+  const bookingFilters: BookingFilters = { companyId: '', status: '' };
   const reloadBookings = async (): Promise<void> => {
-    if (bookingsPanel && companySelect.value) {
-      await renderOperatorBookings(bookingsPanel, Number(companySelect.value), reloadMap);
+    if (bookingsPanel) {
+      await renderOperatorBookings(bookingsPanel, reloadMap, bookingFilters);
     }
   };
 
@@ -1548,34 +1570,109 @@ async function renderAvailabilityControls(
   }
 }
 
+function bookingStatusLabel(status: string): string {
+  switch (status) {
+    case 'held': return getLocalizedText(structure.commonText.bookingStatusHeld);
+    case 'confirmed': return getLocalizedText(structure.commonText.bookingStatusConfirmed);
+    case 'cancelled': return getLocalizedText(structure.commonText.bookingStatusCancelled);
+    case 'expired': return getLocalizedText(structure.commonText.bookingStatusExpired);
+    default: return status;
+  }
+}
+
 async function renderOperatorBookings(
   panel: HTMLElement,
-  companyId: number,
-  refreshMap: () => Promise<void>
+  refreshMap: () => Promise<void>,
+  filters: BookingFilters
 ): Promise<void> {
   panel.innerHTML = '';
+  const isAdmin = currentUser?.role === 'admin';
+
+  const rerender = () => { void renderOperatorBookings(panel, refreshMap, filters); };
 
   const header = document.createElement('div');
   header.className = 'operator-bookings-header';
 
   const heading = document.createElement('h3');
-  heading.textContent = getLocalizedText(structure.commonText.companyBookings);
+  heading.textContent = getLocalizedText(structure.commonText.bookingsTitle);
   header.appendChild(heading);
 
   const refreshBtn = document.createElement('button');
   refreshBtn.type = 'button';
   refreshBtn.className = 'operator-bookings-refresh';
   refreshBtn.textContent = getLocalizedText(structure.commonText.refreshBookings);
-  refreshBtn.addEventListener('click', () => {
-    void renderOperatorBookings(panel, companyId, refreshMap);
-  });
+  refreshBtn.addEventListener('click', rerender);
   header.appendChild(refreshBtn);
 
   panel.appendChild(header);
 
+  const filterControl = (labelText: string, control: HTMLSelectElement): HTMLElement => {
+    const wrapper = document.createElement('label');
+    wrapper.className = 'booking-filter';
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    wrapper.appendChild(span);
+    wrapper.appendChild(control);
+    return wrapper;
+  };
+
+  const filterBar = document.createElement('div');
+  filterBar.className = 'operator-bookings-filters';
+
+  // Admin can scope to a company; operators are already scoped server-side.
+  if (isAdmin) {
+    const companySelect = document.createElement('select');
+    const allOption = document.createElement('option');
+    allOption.value = '';
+    allOption.textContent = getLocalizedText(structure.commonText.allCompanies);
+    companySelect.appendChild(allOption);
+    try {
+      const companies = await fetchRows('/public/companies') as Array<Record<string, unknown>>;
+      companies.forEach((company) => {
+        const option = document.createElement('option');
+        option.value = String(company.id);
+        option.textContent = String(company.name);
+        companySelect.appendChild(option);
+      });
+    } catch (error) {
+      console.error('Error loading company filter:', error);
+    }
+    companySelect.value = filters.companyId;
+    companySelect.addEventListener('change', () => {
+      filters.companyId = companySelect.value;
+      rerender();
+    });
+    filterBar.appendChild(filterControl(getLocalizedText(structure.commonText.company), companySelect));
+  }
+
+  const statusSelect = document.createElement('select');
+  ([
+    ['', structure.commonText.statusActive],
+    ['held', structure.commonText.bookingStatusHeld],
+    ['confirmed', structure.commonText.bookingStatusConfirmed],
+    ['cancelled', structure.commonText.bookingStatusCancelled],
+    ['all', structure.commonText.statusAll],
+  ] as Array<[string, LocalizedText]>).forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = getLocalizedText(label);
+    statusSelect.appendChild(option);
+  });
+  statusSelect.value = filters.status;
+  statusSelect.addEventListener('change', () => {
+    filters.status = statusSelect.value;
+    rerender();
+  });
+  filterBar.appendChild(filterControl(getLocalizedText(structure.commonText.status), statusSelect));
+
+  panel.appendChild(filterBar);
+
   let bookings: Booking[] = [];
   try {
-    const response = await apiFetch(`/companies/${companyId}/bookings`);
+    const params = new URLSearchParams();
+    if (filters.companyId) params.set('company_id', filters.companyId);
+    if (filters.status) params.set('status', filters.status);
+    const response = await apiFetch(`/bookings?${params.toString()}`);
 
     if (!response.ok) {
       throw new Error(await errorMessage(response));
@@ -1588,7 +1685,7 @@ async function renderOperatorBookings(
     message.className = 'operator-bookings-empty';
     message.textContent = getLocalizedText(structure.commonText.errorLoadingData);
     panel.appendChild(message);
-    console.error('Error loading company bookings:', error);
+    console.error('Error loading bookings:', error);
     return;
   }
 
@@ -1602,7 +1699,7 @@ async function renderOperatorBookings(
 
   const reload = async (): Promise<void> => {
     await refreshMap();
-    await renderOperatorBookings(panel, companyId, refreshMap);
+    await renderOperatorBookings(panel, refreshMap, filters);
   };
 
   const surface = document.createElement('div');
@@ -1612,14 +1709,15 @@ async function renderOperatorBookings(
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
 
-  [
+  ([
+    ...(isAdmin ? [structure.commonText.company] : []),
     structure.commonText.court,
     structure.commonText.schedule,
     structure.commonText.customer,
     structure.commonText.status,
     structure.commonText.price,
     structure.commonText.actions,
-  ].forEach((label) => {
+  ] as LocalizedText[]).forEach((label) => {
     const th = document.createElement('th');
     th.textContent = getLocalizedText(label);
     headerRow.appendChild(th);
@@ -1632,25 +1730,33 @@ async function renderOperatorBookings(
 
   bookings.forEach((booking) => {
     const row = document.createElement('tr');
+    const cells: HTMLTableCellElement[] = [];
+
+    if (isAdmin) {
+      const companyCell = document.createElement('td');
+      companyCell.textContent = booking.company_name ?? '';
+      cells.push(companyCell);
+    }
 
     const courtCell = document.createElement('td');
     courtCell.textContent = booking.court_name;
+    cells.push(courtCell);
 
     const scheduleCell = document.createElement('td');
     scheduleCell.textContent = `${formatSlotTime(booking.starts_at)} - ${formatSlotTime(booking.ends_at)}`;
+    cells.push(scheduleCell);
 
     const customerCell = document.createElement('td');
     customerCell.textContent = booking.customer_name;
+    cells.push(customerCell);
 
     const statusCell = document.createElement('td');
-    statusCell.textContent = getLocalizedText(
-      booking.status === 'held'
-        ? structure.commonText.bookingStatusHeld
-        : structure.commonText.bookingStatusConfirmed
-    );
+    statusCell.textContent = bookingStatusLabel(booking.status);
+    cells.push(statusCell);
 
     const priceCell = document.createElement('td');
     priceCell.textContent = `${booking.price_total} ${booking.currency}`;
+    cells.push(priceCell);
 
     const actionsCell = document.createElement('td');
     const actions = document.createElement('div');
@@ -1663,42 +1769,30 @@ async function renderOperatorBookings(
       confirmBtn.textContent = getLocalizedText(structure.commonText.confirm);
       confirmBtn.addEventListener('click', async () => {
         const response = await apiFetch(`/bookings/${booking.id}/confirm`, { method: 'POST' });
-
-        if (!response.ok) {
-          return showErrorMessage(await errorMessage(response));
-        }
-
+        if (!response.ok) return showErrorMessage(await errorMessage(response));
         setMessage(getLocalizedText(structure.commonText.bookingConfirmed));
         await reload();
       });
       actions.appendChild(confirmBtn);
     }
 
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'cancel-btn';
-    cancelBtn.textContent = getLocalizedText(structure.commonText.cancel);
-    cancelBtn.addEventListener('click', async () => {
-      const response = await apiFetch(`/bookings/${booking.id}/cancel`, { method: 'POST' });
-
-      if (!response.ok) {
-        return showErrorMessage(await errorMessage(response));
-      }
-
-      await reload();
-    });
-    actions.appendChild(cancelBtn);
+    if (booking.status === 'held' || booking.status === 'confirmed') {
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'cancel-btn';
+      cancelBtn.textContent = getLocalizedText(structure.commonText.cancel);
+      cancelBtn.addEventListener('click', async () => {
+        const response = await apiFetch(`/bookings/${booking.id}/cancel`, { method: 'POST' });
+        if (!response.ok) return showErrorMessage(await errorMessage(response));
+        await reload();
+      });
+      actions.appendChild(cancelBtn);
+    }
 
     actionsCell.appendChild(actions);
+    cells.push(actionsCell);
 
-    appendChildren(row, [
-      courtCell,
-      scheduleCell,
-      customerCell,
-      statusCell,
-      priceCell,
-      actionsCell,
-    ]);
+    appendChildren(row, cells);
     tbody.appendChild(row);
   });
 
@@ -1797,18 +1891,54 @@ function renderAvailabilityMap(
   const bookingPanel = document.createElement('div');
   bookingPanel.className = 'availability-booking';
 
+  // Size/format selector: each format level (11, 8, 5…) is shown on its own so
+  // subcourts are visible and reservable instead of overlapping the big court.
+  const formats = [...new Set(data.courts.map((court) => court.format))];
+  let formatFilter = data.courts.find((court) => court.parent_court_id == null)?.format
+    ?? formats[0] ?? '';
+
+  if (formats.length > 1) {
+    const sizeBar = document.createElement('div');
+    sizeBar.className = 'availability-size';
+
+    const sizeLabel = document.createElement('span');
+    sizeLabel.textContent = getLocalizedText(structure.commonText.courtSize);
+    sizeBar.appendChild(sizeLabel);
+
+    const sizeSelect = document.createElement('select');
+    formats.forEach((format) => {
+      const option = document.createElement('option');
+      option.value = format;
+      option.textContent = getCourtFormatLabel(format);
+      sizeSelect.appendChild(option);
+    });
+    sizeSelect.value = formatFilter;
+    sizeSelect.addEventListener('change', () => {
+      formatFilter = sizeSelect.value;
+      selectedCourtId = data.courts.find((court) => court.format === formatFilter)?.id ?? null;
+      selectedSlotStart = null;
+      draw();
+    });
+    sizeBar.appendChild(sizeSelect);
+    output.appendChild(sizeBar);
+  }
+
   output.appendChild(map);
   output.appendChild(slotsPanel);
   output.appendChild(bookingPanel);
 
-  let selectedCourtId = data.courts[0]?.id ?? null;
+  let selectedCourtId: number | null = data.courts.find((court) => court.format === formatFilter)?.id
+    ?? data.courts[0]?.id ?? null;
+  let selectedSlotStart: string | null = null;
 
   const draw = () => {
     map.innerHTML = '';
     slotsPanel.innerHTML = '';
     bookingPanel.innerHTML = '';
 
-    data.courts.forEach((court) => {
+    const visibleCourts = data.courts.filter((court) => court.format === formatFilter);
+
+    visibleCourts.forEach((court) => {
       const button = document.createElement('button');
 
       button.type = 'button';
@@ -1822,13 +1952,15 @@ function renderAvailabilityMap(
       button.textContent = court.name;
       button.addEventListener('click', () => {
         selectedCourtId = court.id;
+        selectedSlotStart = null;
         draw();
       });
 
       map.appendChild(button);
     });
 
-    const selected = data.courts.find((court) => court.id === selectedCourtId);
+    const selected = visibleCourts.find((court) => court.id === selectedCourtId)
+      ?? visibleCourts[0];
     if (!selected) return;
 
     const heading = document.createElement('h3');
@@ -1842,19 +1974,31 @@ function renderAvailabilityMap(
       button.type = 'button';
       button.className = 'slot-btn';
       button.dataset.status = slot.status;
+      button.classList.toggle('selected', slot.starts_at === selectedSlotStart);
       button.textContent = `${formatSlotTime(slot.starts_at)}${price}`;
-      button.disabled = slot.status !== 'available';
+      // Operators can also open occupied slots to manage the reservation.
+      const occupied = slot.status === 'held' || slot.status === 'confirmed';
+      button.disabled = slot.status === 'available'
+        ? false
+        : !(operatorCanConfirm && occupied);
       button.addEventListener('click', () => {
-        renderBookingForm(
-          data.company.id,
-          selected,
-          sportId,
-          durationMinutes,
-          slot,
-          bookingPanel,
-          refresh,
-          operatorCanConfirm
-        );
+        selectedSlotStart = slot.starts_at;
+        slotsPanel.querySelectorAll('.slot-btn.selected').forEach((other) => other.classList.remove('selected'));
+        button.classList.add('selected');
+        if (slot.status === 'available') {
+          renderBookingForm(
+            data.company.id,
+            selected,
+            sportId,
+            durationMinutes,
+            slot,
+            bookingPanel,
+            refresh,
+            operatorCanConfirm
+          );
+        } else if (operatorCanConfirm && occupied) {
+          void renderSlotReservation(data, selected, slot, bookingPanel, refresh);
+        }
       });
 
       slotsPanel.appendChild(button);
@@ -1890,6 +2034,99 @@ function renderAvailabilityMap(
   };
 
   draw();
+}
+
+// Operator view shown when an occupied slot is clicked: the reservation(s)
+// affecting that court/time, with confirm/cancel.
+async function renderSlotReservation(
+  data: AvailabilityResponse,
+  court: AvailabilityCourt,
+  slot: AvailabilitySlot,
+  panel: HTMLElement,
+  refresh: () => Promise<void>
+): Promise<void> {
+  panel.innerHTML = '';
+
+  const card = document.createElement('div');
+  card.className = 'slot-reservation';
+  const title = document.createElement('h3');
+  title.textContent = `${court.name} · ${formatSlotTime(slot.starts_at)}`;
+  card.appendChild(title);
+  panel.appendChild(card);
+
+  const courtById = new Map(data.courts.map((candidate) => [candidate.id, candidate]));
+  const rootOf = (id: number): number => {
+    const candidate = courtById.get(id);
+    return candidate ? (candidate.root_court_id ?? candidate.id) : id;
+  };
+  const selectedRoot = court.root_court_id ?? court.id;
+
+  let bookings: Booking[] = [];
+  try {
+    const response = await apiFetch(`/bookings?company_id=${encodeURIComponent(String(data.company.id))}`);
+    if (!response.ok) throw new Error(await errorMessage(response));
+    const all = ((await response.json()) as { data?: Booking[] }).data ?? [];
+    bookings = all.filter(
+      (booking) => booking.starts_at === slot.starts_at && rootOf(Number(booking.court_id)) === selectedRoot
+    );
+  } catch (error) {
+    const message = document.createElement('p');
+    message.className = 'operator-bookings-empty';
+    message.textContent = getLocalizedText(structure.commonText.errorLoadingData);
+    card.appendChild(message);
+    console.error('Error loading slot reservation:', error);
+    return;
+  }
+
+  if (bookings.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'operator-bookings-empty';
+    empty.textContent = getLocalizedText(structure.commonText.noBookings);
+    card.appendChild(empty);
+    return;
+  }
+
+  bookings.forEach((booking) => {
+    const item = document.createElement('div');
+    item.className = 'slot-reservation-item';
+
+    const info = document.createElement('p');
+    info.className = 'slot-reservation-info';
+    const courtName = courtById.get(Number(booking.court_id))?.name ?? booking.court_name ?? '';
+    info.textContent = `${booking.customer_name} · ${courtName} · ${bookingStatusLabel(booking.status)}`;
+    item.appendChild(info);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    if (booking.status === 'held') {
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.className = 'confirm-btn';
+      confirmBtn.textContent = getLocalizedText(structure.commonText.confirm);
+      confirmBtn.addEventListener('click', async () => {
+        const result = await apiFetch(`/bookings/${booking.id}/confirm`, { method: 'POST' });
+        if (!result.ok) return showErrorMessage(await errorMessage(result));
+        setMessage(getLocalizedText(structure.commonText.bookingConfirmed));
+        await refresh();
+      });
+      actions.appendChild(confirmBtn);
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'cancel-btn';
+    cancelBtn.textContent = getLocalizedText(structure.commonText.cancel);
+    cancelBtn.addEventListener('click', async () => {
+      const result = await apiFetch(`/bookings/${booking.id}/cancel`, { method: 'POST' });
+      if (!result.ok) return showErrorMessage(await errorMessage(result));
+      await refresh();
+    });
+    actions.appendChild(cancelBtn);
+
+    item.appendChild(actions);
+    card.appendChild(item);
+  });
 }
 
 function renderBookingForm(
@@ -2604,6 +2841,14 @@ function renderFilters<K extends TableKey>(tableKey: K): void {
 
 addRecordBtn.addEventListener('click', () => showAnyForm(activeTableKey));
 
+// Close the modal form when clicking the backdrop or pressing Escape.
+formContainer.addEventListener('click', (event) => {
+  if (event.target === formContainer) hideAnyForm();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && formContainer.style.display !== 'none') hideAnyForm();
+});
+
 function getFieldElementId(tableKey: TableKey, fieldName: string): string {
   return `${tableKey}-${fieldName}`;
 }
@@ -2994,18 +3239,14 @@ function setupCourtPartitionRuleOptions(
   if (isEdit) {
     const help = document.createElement('small');
     help.className = 'field-hint';
-    help.textContent = savedPartitionable
-      ? getLocalizedText(structure.commonText.partitionEditReadyHint)
-      : getLocalizedText(structure.commonText.partitionEditDisabledHint);
+    help.textContent = getLocalizedText(structure.commonText.partitionEditReadyHint);
     field.appendChild(help);
 
-    if (savedPartitionable) {
-      applyButton = document.createElement('button');
-      applyButton.type = 'button';
-      applyButton.className = 'edit-btn';
-      applyButton.textContent = getLocalizedText(structure.commonText.applyPartitionRule);
-      field.appendChild(applyButton);
-    }
+    applyButton = document.createElement('button');
+    applyButton.type = 'button';
+    applyButton.className = 'edit-btn';
+    applyButton.textContent = getLocalizedText(structure.commonText.applyPartitionRule);
+    field.appendChild(applyButton);
   }
 
   formatSelect.closest('.form-group')?.insertAdjacentElement('afterend', field);
@@ -3014,7 +3255,7 @@ function setupCourtPartitionRuleOptions(
   const update = async () => {
     const version = ++loadVersion;
     const format = formatSelect.value;
-    const isPartitionable = isEdit ? savedPartitionable : partitionableSelect.value === 'true';
+    const isPartitionable = partitionableSelect.value === 'true';
 
     field.hidden = !isPartitionable;
     ruleSelect.required = !isEdit && isPartitionable;
@@ -3076,18 +3317,36 @@ function setupCourtPartitionRuleOptions(
     }
   };
 
-  formatSelect.addEventListener('change', () => {
-    if (!isEdit) update().catch(() => undefined);
-  });
-  partitionableSelect.addEventListener('change', () => {
-    if (!isEdit) update().catch(() => undefined);
-  });
+  formatSelect.addEventListener('change', () => update().catch(() => undefined));
+  partitionableSelect.addEventListener('change', () => update().catch(() => undefined));
 
   applyButton?.addEventListener('click', async () => {
     if (!ruleSelect.value || !record?.id || !record.company_id) {
       error.textContent = getLocalizedText(structure.commonText.choosePartitionRuleToContinue);
       ruleSelect.classList.add('invalid');
       return;
+    }
+
+    // If the court was just marked partitionable (not yet saved), persist that
+    // first so the partition endpoint accepts it — no extra save/refresh step.
+    if (partitionableSelect.value === 'true' && !savedPartitionable) {
+      const nameInput = document.getElementById('courts-name') as HTMLInputElement | null;
+      const courtSportSelect = document.getElementById('courts-sport_id') as HTMLSelectElement | null;
+      const putResponse = await apiFetch(`/courts?id=${encodeURIComponent(String(record.id))}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          company_id: Number(record.company_id),
+          name: nameInput?.value ?? String(record.name ?? ''),
+          sport_id: Number(courtSportSelect?.value ?? record.sport_id),
+          format: formatSelect.value || String(record.format ?? ''),
+          is_partitionable: true,
+        }),
+      });
+
+      if (!putResponse.ok) {
+        error.textContent = await errorMessage(putResponse);
+        return;
+      }
     }
 
     const response = await apiFetch(

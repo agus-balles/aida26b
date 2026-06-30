@@ -113,6 +113,23 @@ export function buildListQuery(
         values.push(actualVal);
         paramIndex++;
       } else if (config.type === "number") {
+        if (config.foreignKey) {
+          // Foreign-key ids must filter by exact match, not as a numeric range
+          // (a plain number is otherwise treated as a `>=` lower bound below).
+          const fkValue = Number(actualVal);
+
+          if (Number.isNaN(fkValue)) {
+            continue;
+          }
+
+          conditions.push(
+            `"${fieldName}" ${negated ? "!=" : "="} $${paramIndex}`
+          );
+          values.push(fkValue);
+          paramIndex++;
+          continue;
+        }
+
         const commaIdx = actualVal.indexOf(",");
 
         if (commaIdx >= 0) {

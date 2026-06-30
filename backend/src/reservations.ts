@@ -1172,6 +1172,71 @@ export function listCompanyBookings(pool: Pool) {
   };
 }
 
+/**
+ * Cross-company bookings list for operators/admin, with optional filters.
+ * Admin sees every company; an operator is scoped to their linked companies.
+ * Query: company_id (optional), status (held|confirmed|cancelled|expired|all;
+ * default = active = held+confirmed).
+ */
+export function listBookings(pool: Pool) {
+  return async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthedRequest).user;
+      if (!user) {
+        throw new HttpError(401, { error: 'Necesitás iniciar sesión.' });
+      }
+
+      await expireHeldBookings(pool);
+
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+
+      if (user.role !== 'admin') {
+        const links = await pool.query<{ company_id: number }>(
+          'SELECT company_id FROM auth.user_companies WHERE user_id = $1',
+          [user.id]
+        );
+        const ids = links.rows.map((row) => Number(row.company_id));
+        if (ids.length === 0) return res.json({ data: [] });
+        params.push(ids);
+        conditions.push(`b.company_id = ANY($${params.length}::bigint[])`);
+      }
+
+      const companyId = readOptionalPositiveInteger(req.query.company_id, 'company_id');
+      if (companyId !== null) {
+        params.push(companyId);
+        conditions.push(`b.company_id = $${params.length}`);
+      }
+
+      const status = stringValue(req.query.status);
+      if (status === 'held' || status === 'confirmed' || status === 'cancelled' || status === 'expired') {
+        params.push(status);
+        conditions.push(`b.status = $${params.length}`);
+      } else if (status !== 'all') {
+        conditions.push(`b.status IN ('held', 'confirmed')`);
+      }
+
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      const result = await pool.query(
+        `SELECT b.id, b.company_id, co.name AS company_name, b.court_id, c.name AS court_name,
+                b.sport_id, b.starts_at, b.ends_at, b.status, b.customer_name, b.customer_email,
+                b.customer_phone, b.price_total, b.currency, b.hold_expires_at, b.created_at
+         FROM bookings b
+         JOIN courts c ON c.id = b.court_id
+         JOIN companies co ON co.id = b.company_id
+         ${where}
+         ORDER BY b.starts_at DESC`,
+        params
+      );
+
+      return res.json({ data: result.rows });
+    } catch (error) {
+      return sendReservationError(res, error, 'Error listing bookings');
+    }
+  };
+}
+
 function sendReservationError(res: Response, error: unknown, fallback: string) {
   if (error instanceof HttpError) {
     return res.status(error.status).json(error.body);

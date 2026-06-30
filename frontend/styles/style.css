@@ -440,6 +440,14 @@ textarea.invalid:focus-visible {
     gap: 10px;
 }
 
+/* Theme/language pickers live in the header so they work logged out too. */
+.header-menu {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
 .picker-wrapper {
     display: flex;
     align-items: center;
@@ -482,14 +490,28 @@ textarea.invalid:focus-visible {
     margin: 0;
 }
 
+/* The add/edit form is a centred modal so editing never pushes the page. */
 #record-form {
-    margin-bottom: 20px;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    /* display is toggled to flex by JS when open */
+    align-items: flex-start;
+    justify-content: center;
+    padding: 48px 16px;
+    overflow-y: auto;
+    background: rgba(8, 15, 14, 0.55);
 }
 
 #record-form form {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0 18px;
+    width: 100%;
+    max-width: 660px;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+    align-self: flex-start;
 }
 
 #record-form form > h3,
@@ -788,6 +810,24 @@ tbody tr:last-child td {
     align-items: start;
 }
 
+.availability-size {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.availability-size select {
+    width: auto;
+    min-height: 34px;
+    padding: 5px 28px 5px 9px;
+    font-size: 14px;
+}
+
 .availability-map,
 .availability-slots,
 .availability-booking {
@@ -878,6 +918,15 @@ tbody tr:last-child td {
     color: var(--text-muted);
 }
 
+/* Highlight the slot the user picked, regardless of its availability colour. */
+.slot-btn.selected {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--text);
+    box-shadow: var(--focus-ring);
+    font-weight: 700;
+}
+
 .slot-alternatives {
     display: flex;
     flex-wrap: wrap;
@@ -949,6 +998,73 @@ tbody tr:last-child td {
     margin: 0;
     color: var(--text-muted);
     font-size: 14px;
+}
+
+.operator-bookings-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.booking-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.booking-filter select {
+    width: auto;
+    min-height: 34px;
+    padding: 5px 28px 5px 9px;
+    font-size: 13px;
+}
+
+.slot-reservation {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    padding: 18px;
+}
+
+.slot-reservation h3 {
+    margin: 0 0 12px;
+}
+
+.slot-reservation-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+}
+
+.slot-reservation-item:first-of-type {
+    border-top: none;
+}
+
+.slot-reservation-info {
+    margin: 0;
+    font-size: 14px;
+}
+
+.slot-reservation .confirm-btn {
+    border-color: var(--success);
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.slot-reservation .cancel-btn {
+    border-color: var(--danger);
+    background: transparent;
+    color: var(--danger);
 }
 
 .operator-bookings-table {

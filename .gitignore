@@ -142,3 +142,6 @@ vite.config.ts.timestamp-*
 .omc/
 **/.omc/
 auth.md
+
+# Local docker port overrides (do not commit)
+docker-compose.override.yml
