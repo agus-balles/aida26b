@@ -1320,3 +1320,161 @@ p.successOutputInfo {
         margin-right: 0;
     }
 }
+
+/* -----------------------------------------------------------------------------
+   Onboarding guided tour
+   ----------------------------------------------------------------------------- */
+
+.tour-help-btn {
+    border-color: transparent;
+    background: transparent;
+    color: var(--primary);
+}
+
+.tour-help-btn:hover:not(:disabled) {
+    border-color: var(--primary-soft);
+    background: var(--primary-soft);
+}
+
+/* Base `button { display: inline-flex }` (author origin) beats the UA [hidden]
+   rule, so the attribute alone would not hide the button. */
+.tour-help-btn[hidden] {
+    display: none;
+}
+
+/* Full-screen click guard sitting under the spotlight and popup. Transparent by
+   default (the highlight's huge box-shadow provides the dimming); it only paints
+   its own scrim for centered steps that have no anchor. */
+.tour-blocker {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    cursor: default;
+    background: transparent;
+}
+
+.tour-blocker--dim {
+    background: rgba(8, 15, 14, 0.6);
+}
+
+/* The spotlight box: a transparent rectangle whose massive spread box-shadow
+   dims everything around the highlighted element. */
+.tour-highlight {
+    position: fixed;
+    z-index: 2001;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    border-radius: 10px;
+    border: 2px solid var(--primary);
+    box-shadow: 0 0 0 9999px rgba(8, 15, 14, 0.6), 0 0 0 4px var(--primary-soft);
+    pointer-events: none;
+    transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
+    animation: tour-pulse 1.8s ease-in-out infinite;
+}
+
+.tour-highlight--hidden {
+    display: none;
+}
+
+@keyframes tour-pulse {
+    0%, 100% { box-shadow: 0 0 0 9999px rgba(8, 15, 14, 0.6), 0 0 0 4px var(--primary-soft); }
+    50% { box-shadow: 0 0 0 9999px rgba(8, 15, 14, 0.6), 0 0 0 8px var(--primary-soft); }
+}
+
+.tour-popup {
+    position: fixed;
+    z-index: 2002;
+    width: min(360px, calc(100vw - 32px));
+    padding: 18px 18px 16px;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+}
+
+.tour-popup--centered {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.tour-popup__title {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+    color: var(--text);
+}
+
+.tour-popup__body {
+    margin: 0 0 16px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.tour-popup__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.tour-popup__progress {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.tour-popup__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tour-popup__actions button {
+    min-height: 36px;
+    padding: 6px 14px;
+}
+
+.tour-popup__skip {
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.tour-popup__skip:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-muted);
+}
+
+.tour-popup__back {
+    border-color: var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+}
+
+.tour-popup__back:hover:not(:disabled) {
+    background: var(--surface-muted);
+}
+
+.tour-popup__next {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+}
+
+.tour-popup__next:hover:not(:disabled) {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+}
+
+@media (max-width: 480px) {
+    .tour-popup__footer {
+        justify-content: flex-end;
+    }
+
+    .tour-popup__progress {
+        width: 100%;
+    }
+}

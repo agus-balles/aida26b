@@ -145,6 +145,7 @@ const changePasswordBtn = document.getElementById('change-password-btn') as HTML
 const logoutBtn = document.getElementById('logout-btn') as HTMLButtonElement;
 const homeBtn = document.getElementById('home-btn') as HTMLButtonElement;
 const loginNavBtn = document.getElementById('login-nav-btn') as HTMLButtonElement;
+const tourHelpBtn = document.getElementById('tour-help-btn') as HTMLButtonElement;
 const statusMessage = document.getElementById('status-message') as HTMLElement;
 
 const viewTitle = document.getElementById('view-title') as HTMLElement;
@@ -221,6 +222,7 @@ function showPublicLanding(): void {
 
   loginError.hidden = true;
   loginNavBtn.hidden = false;
+  tourHelpBtn.hidden = true;
 }
 
 // Dedicated login view: only the login form, reached from the header button.
@@ -235,6 +237,7 @@ function showLogin(message = ''): void {
   permissionsNavButton?.setAttribute('hidden', '');
 
   loginNavBtn.hidden = true;
+  tourHelpBtn.hidden = true;
 
   loginError.textContent = message;
   loginError.hidden = !message;
@@ -249,6 +252,7 @@ function showPasswordChange(user: AuthUser, companyLinks: CompanyLink[]): void {
   publicBookingSection.style.display = 'none';
   appShell.style.display = 'none';
   loginNavBtn.hidden = true;
+  tourHelpBtn.hidden = true;
 
   passwordError.hidden = true;
 }
@@ -284,6 +288,7 @@ function showApp(user: AuthUser, companyLinks: CompanyLink[] = []): void {
   publicBookingSection.style.display = 'none';
   appShell.style.display = 'block';
   loginNavBtn.hidden = true;
+  tourHelpBtn.hidden = false;
 
   if (permissionsNavButton) {
     permissionsNavButton.hidden = user.role !== 'admin';
@@ -292,6 +297,8 @@ function showApp(user: AuthUser, companyLinks: CompanyLink[] = []): void {
   currentUserEl.textContent = `${user.username} (${user.role})`;
 
   showSection(activeTableKey, false);
+
+  maybeStartOnboarding(user);
 }
 
 async function apiFetch(path: string, options: RequestInit = {}): Promise<globalThis.Response> {
@@ -3987,6 +3994,397 @@ window.deleteRecord = async <K extends TableKey>(
 };
 
 // -----------------------------------------------------------------------------
+// Onboarding guided tour
+// -----------------------------------------------------------------------------
+//
+// A dependency-free, skippable walkthrough shown the first time a company logs
+// in. It spotlights each section of the platform (courts, prices, schedule,
+// bookings, team & roles…) with an anchored popup. Completion is stored per
+// user in localStorage, and the header "Guía" button reopens it on demand.
+
+type TourStep = {
+  title: LocalizedText;
+  body: LocalizedText;
+  // Resolved lazily so we can navigate/scroll before locating the anchor.
+  target?: () => HTMLElement | null;
+  // Runs before the step is shown (e.g. switch to the relevant section).
+  before?: () => void | Promise<void>;
+  // Include the step only when this returns true (permissions, visibility…).
+  when?: () => boolean;
+};
+
+const ONBOARDING_STORAGE_PREFIX = 'court-booking.onboarding.v1.';
+
+let tourEls: { blocker: HTMLElement; highlight: HTMLElement; popup: HTMLElement } | null = null;
+let tourSteps: TourStep[] = [];
+let tourIndex = 0;
+let tourReturnSection: TableKey | null = null;
+let tourResizeHandler: (() => void) | null = null;
+
+function onboardingKey(user: AuthUser): string {
+  return `${ONBOARDING_STORAGE_PREFIX}${user.id}`;
+}
+
+function hasCompletedOnboarding(user: AuthUser): boolean {
+  try {
+    return localStorage.getItem(onboardingKey(user)) === 'done';
+  } catch {
+    // If storage is unavailable, avoid nagging the user on every load.
+    return true;
+  }
+}
+
+function markOnboardingComplete(): void {
+  if (!currentUser) return;
+  try {
+    localStorage.setItem(onboardingKey(currentUser), 'done');
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+function isElementVisible(el: HTMLElement | null): el is HTMLElement {
+  if (!el || el.hidden) return false;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function buildTourSteps(): TourStep[] {
+  const navButton = (key: TableKey) => () => tableNavButtons[key] ?? null;
+  const navVisible = (key: TableKey) => () => isElementVisible(tableNavButtons[key]);
+
+  const allSteps: TourStep[] = [
+    {
+      title: { es: '¡Te damos la bienvenida! 👋', en: 'Welcome aboard! 👋' },
+      body: {
+        es: 'En menos de un minuto te mostramos todo lo que podés hacer en tu panel. Podés omitir esta guía cuando quieras.',
+        en: "In under a minute we'll walk you through everything you can do in your dashboard. You can skip this guide anytime.",
+      },
+    },
+    {
+      title: { es: 'Tu menú principal', en: 'Your main menu' },
+      body: {
+        es: 'Desde esta barra accedés a todas las secciones de la plataforma.',
+        en: 'This bar gives you access to every section of the platform.',
+      },
+      target: () => document.getElementById('general-nav'),
+      when: () => isElementVisible(document.getElementById('general-nav')),
+    },
+    {
+      title: { es: 'Los datos de tu empresa', en: 'Your company details' },
+      body: {
+        es: 'En «Empresas» configurás el nombre, la dirección y la zona horaria de tu club.',
+        en: 'Under "Companies" you set your club\'s name, address and time zone.',
+      },
+      target: navButton('companies'),
+      when: navVisible('companies'),
+    },
+    {
+      title: { es: 'Creá tus canchas', en: 'Set up your courts' },
+      body: {
+        es: 'En «Canchas» das de alta cada cancha, elegís su formato y definís su ubicación.',
+        en: 'Under "Courts" you add each court and choose its format and layout.',
+      },
+      target: navButton('courts'),
+      before: () => showSection('courts', false),
+      when: navVisible('courts'),
+    },
+    {
+      title: { es: 'Creá tu primera cancha', en: 'Create your first court' },
+      body: {
+        es: 'Hacé clic en «Agregar Cancha» para dar de alta tu primera cancha. Repetí el proceso para las demás.',
+        en: 'Click "Add Court" to create your first court. Repeat for the rest.',
+      },
+      target: () => addRecordBtn,
+      before: () => showSection('courts', false),
+      when: () => canWriteTable('courts', true) && isElementVisible(addRecordBtn),
+    },
+    {
+      title: { es: 'Definí tus precios', en: 'Set your prices' },
+      body: {
+        es: 'En «Precios» establecés cuánto cuesta cada franja horaria de tus canchas.',
+        en: 'Under "Prices" you set the cost of each time slot for your courts.',
+      },
+      target: navButton('court_prices'),
+      when: navVisible('court_prices'),
+    },
+    {
+      title: { es: 'Configurá tus horarios', en: 'Configure your schedule' },
+      body: {
+        es: 'En «Bloques Horarios» definís los horarios de apertura y los cierres de tu club.',
+        en: 'Under "Time Blocks" you define your club\'s opening hours and closures.',
+      },
+      target: navButton('company_time_blocks'),
+      when: navVisible('company_time_blocks'),
+    },
+    {
+      title: { es: 'Disponibilidad y reservas', en: 'Availability & bookings' },
+      body: {
+        es: 'En «Disponibilidad» ves el calendario en tiempo real y gestionás las reservas de tus clientes.',
+        en: "Under \"Availability\" you see the live calendar and manage your customers' bookings.",
+      },
+      target: () => availabilityNavButton,
+      when: () => isElementVisible(availabilityNavButton),
+    },
+    {
+      title: { es: 'Tu equipo y sus roles', en: 'Your team and their roles' },
+      body: {
+        es: 'En «Permisos» creás los usuarios de tu equipo y les asignás un rol (owner, manager, staff o viewer).',
+        en: 'Under "Permissions" you create your team members and assign each a role (owner, manager, staff or viewer).',
+      },
+      target: () => permissionsNavButton,
+      when: () => isElementVisible(permissionsNavButton),
+    },
+    {
+      title: { es: 'Idioma y tema', en: 'Language & theme' },
+      body: {
+        es: 'Desde aquí cambiás el idioma y alternás entre el tema claro y oscuro.',
+        en: 'From here you can switch the language and toggle light/dark theme.',
+      },
+      target: () => menuContainer,
+      when: () => isElementVisible(menuContainer),
+    },
+    {
+      title: { es: '¡Listo para empezar! 🎉', en: "You're all set! 🎉" },
+      body: {
+        es: '¿Necesitás repasar? Volvé a abrir esta guía cuando quieras con el botón «Guía».',
+        en: 'Need a refresher? Reopen this guide anytime with the "Guía" button.',
+      },
+      target: () => tourHelpBtn,
+      when: () => isElementVisible(tourHelpBtn),
+    },
+  ];
+
+  return allSteps.filter((step) => (step.when ? step.when() : true));
+}
+
+function ensureTourEls(): NonNullable<typeof tourEls> {
+  if (tourEls) return tourEls;
+
+  const blocker = document.createElement('div');
+  blocker.className = 'tour-blocker';
+  // Swallow clicks on the dimmed area so users can't misclick the app behind
+  // the tour; they advance or leave via the popup buttons or Esc.
+  blocker.addEventListener('click', (event) => event.stopPropagation());
+
+  const highlight = document.createElement('div');
+  highlight.className = 'tour-highlight';
+
+  const popup = document.createElement('div');
+  popup.className = 'tour-popup';
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('aria-modal', 'true');
+
+  tourEls = { blocker, highlight, popup };
+  return tourEls;
+}
+
+function positionTour(target: HTMLElement | null): void {
+  if (!tourEls) return;
+  const { blocker, highlight, popup } = tourEls;
+
+  if (!target) {
+    highlight.classList.add('tour-highlight--hidden');
+    blocker.classList.add('tour-blocker--dim');
+    popup.classList.add('tour-popup--centered');
+    popup.style.top = '';
+    popup.style.left = '';
+    return;
+  }
+
+  blocker.classList.remove('tour-blocker--dim');
+  highlight.classList.remove('tour-highlight--hidden');
+  popup.classList.remove('tour-popup--centered');
+
+  const rect = target.getBoundingClientRect();
+  const pad = 6;
+  highlight.style.top = `${rect.top - pad}px`;
+  highlight.style.left = `${rect.left - pad}px`;
+  highlight.style.width = `${rect.width + pad * 2}px`;
+  highlight.style.height = `${rect.height + pad * 2}px`;
+
+  const margin = 14;
+  const pw = popup.offsetWidth || 320;
+  const ph = popup.offsetHeight || 160;
+
+  let top = rect.bottom + margin;
+  if (top + ph > window.innerHeight - 10) {
+    const above = rect.top - ph - margin;
+    top = above >= 10 ? above : Math.max(10, window.innerHeight - ph - 10);
+  }
+
+  let left = rect.left + rect.width / 2 - pw / 2;
+  left = Math.max(10, Math.min(left, window.innerWidth - pw - 10));
+
+  popup.style.top = `${top}px`;
+  popup.style.left = `${left}px`;
+}
+
+async function renderTourStep(): Promise<void> {
+  if (!tourEls) return;
+  const step = tourSteps[tourIndex];
+  if (!step) {
+    endTour(true);
+    return;
+  }
+
+  if (step.before) await step.before();
+  await nextFrame();
+
+  const target = step.target ? step.target() : null;
+  if (target) {
+    target.scrollIntoView({ block: 'center', inline: 'center' });
+    await nextFrame();
+  }
+
+  const isSpanish = getLanguage() === 'es';
+  const { popup } = tourEls;
+  popup.innerHTML = '';
+
+  const heading = document.createElement('h3');
+  heading.className = 'tour-popup__title';
+  heading.textContent = getLocalizedText(step.title);
+  popup.appendChild(heading);
+
+  const text = document.createElement('p');
+  text.className = 'tour-popup__body';
+  text.textContent = getLocalizedText(step.body);
+  popup.appendChild(text);
+
+  const footer = document.createElement('div');
+  footer.className = 'tour-popup__footer';
+
+  const progress = document.createElement('span');
+  progress.className = 'tour-popup__progress';
+  progress.textContent = isSpanish
+    ? `Paso ${tourIndex + 1} de ${tourSteps.length}`
+    : `Step ${tourIndex + 1} of ${tourSteps.length}`;
+  footer.appendChild(progress);
+
+  const actions = document.createElement('div');
+  actions.className = 'tour-popup__actions';
+
+  const skipBtn = document.createElement('button');
+  skipBtn.type = 'button';
+  skipBtn.className = 'tour-popup__skip';
+  skipBtn.textContent = isSpanish ? 'Omitir' : 'Skip';
+  skipBtn.addEventListener('click', () => endTour(true));
+  actions.appendChild(skipBtn);
+
+  if (tourIndex > 0) {
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'tour-popup__back';
+    backBtn.textContent = isSpanish ? 'Anterior' : 'Back';
+    backBtn.addEventListener('click', () => {
+      tourIndex -= 1;
+      void renderTourStep();
+    });
+    actions.appendChild(backBtn);
+  }
+
+  const isLast = tourIndex === tourSteps.length - 1;
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'tour-popup__next';
+  nextBtn.textContent = isLast
+    ? (isSpanish ? 'Finalizar' : 'Finish')
+    : (isSpanish ? 'Siguiente' : 'Next');
+  nextBtn.addEventListener('click', () => {
+    if (isLast) {
+      endTour(true);
+      return;
+    }
+    tourIndex += 1;
+    void renderTourStep();
+  });
+  actions.appendChild(nextBtn);
+
+  footer.appendChild(actions);
+  popup.appendChild(footer);
+
+  positionTour(target);
+  nextBtn.focus();
+}
+
+function onTourKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    endTour(true);
+  } else if (event.key === 'ArrowRight') {
+    if (tourIndex < tourSteps.length - 1) {
+      tourIndex += 1;
+      void renderTourStep();
+    } else {
+      endTour(true);
+    }
+  } else if (event.key === 'ArrowLeft' && tourIndex > 0) {
+    tourIndex -= 1;
+    void renderTourStep();
+  }
+}
+
+function startOnboardingTour(force = false): void {
+  if (!currentUser) return;
+  if (tourEls && document.body.contains(tourEls.blocker)) return; // already running
+  if (!force && hasCompletedOnboarding(currentUser)) return;
+
+  tourSteps = buildTourSteps();
+  if (tourSteps.length === 0) return;
+
+  tourIndex = 0;
+  tourReturnSection = activeTableKey;
+
+  const { blocker, highlight, popup } = ensureTourEls();
+  document.body.appendChild(blocker);
+  document.body.appendChild(highlight);
+  document.body.appendChild(popup);
+
+  tourResizeHandler = () => {
+    const step = tourSteps[tourIndex];
+    positionTour(step && step.target ? step.target() : null);
+  };
+  window.addEventListener('resize', tourResizeHandler);
+  window.addEventListener('scroll', tourResizeHandler, true);
+  document.addEventListener('keydown', onTourKeydown, true);
+
+  void renderTourStep();
+}
+
+function endTour(markComplete: boolean): void {
+  if (markComplete) markOnboardingComplete();
+
+  if (tourResizeHandler) {
+    window.removeEventListener('resize', tourResizeHandler);
+    window.removeEventListener('scroll', tourResizeHandler, true);
+    tourResizeHandler = null;
+  }
+  document.removeEventListener('keydown', onTourKeydown, true);
+
+  if (tourEls) {
+    tourEls.blocker.remove();
+    tourEls.highlight.remove();
+    tourEls.popup.remove();
+  }
+
+  // Return the user to wherever they were before the tour navigated around.
+  if (tourReturnSection && currentUser) {
+    showSection(tourReturnSection, false);
+  }
+  tourReturnSection = null;
+}
+
+function maybeStartOnboarding(user: AuthUser): void {
+  if (hasCompletedOnboarding(user)) return;
+  // Defer so the app shell and nav buttons have finished laying out.
+  window.setTimeout(() => startOnboardingTour(false), 350);
+}
+
+// -----------------------------------------------------------------------------
 // Initialization
 // -----------------------------------------------------------------------------
 
@@ -3998,6 +4396,8 @@ applyStaticLanguageToUI();
 homeBtn.addEventListener('click', goHome);
 
 loginNavBtn.addEventListener('click', () => showLogin());
+
+tourHelpBtn.addEventListener('click', () => startOnboardingTour(true));
 
 changePasswordBtn.addEventListener('click', () => {
   if (currentUser) showPasswordChange(currentUser, currentCompanyLinks);

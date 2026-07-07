@@ -13,6 +13,7 @@ describe('Menu Pickers (Theme & Language)', () => {
       <div id="app-shell"></div>
       <span id="current-user"></span>
       <button id="login-nav-btn" hidden></button>
+      <button id="tour-help-btn" hidden></button>
       <button id="home-btn"></button>
       <button id="change-password-btn"></button>
       <button id="logout-btn"></button>
