@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 
 import * as auth from './auth';
+import * as customerAuth from './customerAuth';
 import {
   cancelBooking,
   applyCourtPartitionRule,
@@ -16,6 +17,9 @@ import {
   holdBooking,
   listBookings,
   listCompanyBookings,
+  createCustomerBooking,
+  listCustomerBookings,
+  cancelCustomerBooking,
 } from './reservations';
 
 import { getHandler } from './routes/get';
@@ -162,6 +166,77 @@ const requireAdmin: RequestHandler = async (req, res, next) => {
 
   return res.status(403).json({ error: 'Forbidden' });
 };
+
+// --- Customer (end-user) sessions ---------------------------------------------
+
+type CustomerRequest = Request & { customer?: customerAuth.Customer };
+
+async function loadCustomerSession(req: Request): Promise<customerAuth.Customer | null> {
+  const token = customerAuth.getCustomerSessionToken(req.headers.cookie);
+
+  if (!token) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `SELECT c.id, c.email, c.name, c.phone
+     FROM customer_sessions s
+     JOIN customers c ON c.id = s.customer_id
+     WHERE s.token_hash = $1
+       AND s.expires_at > now()
+       AND c.is_active = true`,
+    [auth.hashToken(token)]
+  );
+
+  return result.rows[0] ? customerAuth.publicCustomer(result.rows[0]) : null;
+}
+
+const requireCustomer: RequestHandler = async (req, res, next) => {
+  try {
+    const customer = await loadCustomerSession(req);
+
+    if (!customer) {
+      return res.status(401).json({ error: 'Necesitás iniciar sesión.' });
+    }
+
+    (req as CustomerRequest).customer = customer;
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+async function issueCustomerSession(res: express.Response, customerId: number): Promise<void> {
+  const token = auth.newSessionToken();
+
+  await pool.query(
+    `INSERT INTO customer_sessions (customer_id, token_hash, expires_at)
+     VALUES ($1, $2, now() + interval '30 days')`,
+    [customerId, auth.hashToken(token)]
+  );
+
+  res.setHeader(
+    'Set-Cookie',
+    customerAuth.customerSessionCookie(token, process.env.NODE_ENV === 'production')
+  );
+}
+
+// Link any past anonymous bookings made with this email to the account. The
+// email is not verified, so this is a deliberate product trade-off (chosen so
+// customers see reservations they made before signing up).
+async function claimAnonymousBookings(customerId: number, email: string): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE bookings
+       SET customer_id = $1, updated_at = now()
+       WHERE customer_id IS NULL
+         AND lower(customer_email) = lower($2)`,
+      [customerId, email]
+    );
+  } catch (error) {
+    console.error('Error claiming anonymous bookings:', error);
+  }
+}
 
 const holdAttemptsByIp = new Map<string, number[]>();
 const HOLD_LIMIT_WINDOW_MS = 10 * 60 * 1000;
@@ -621,6 +696,149 @@ app.delete(
       return res.status(500).json({ error: 'No se pudo quitar el permiso de empresa.' });
     }
   }
+);
+
+// Customer (end-user) auth + bookings
+app.post('/api/customer/auth/check-email', async (req, res) => {
+  const email = customerAuth.readCustomerEmail(req.body.email);
+
+  if (!email) {
+    return res.status(400).json({ error: 'Ingresá un email válido.' });
+  }
+
+  try {
+    const result = await pool.query('SELECT 1 FROM customers WHERE email = $1', [email]);
+    return res.json({ exists: (result.rowCount ?? 0) > 0 });
+  } catch (error) {
+    console.error('Error checking customer email:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/customer/auth/register', async (req, res) => {
+  const email = customerAuth.readCustomerEmail(req.body.email);
+  const name = customerAuth.readCustomerName(req.body.name);
+  const phone = customerAuth.readCustomerPhone(req.body.phone);
+  const password = req.body.password;
+  const passwordConfirm = req.body.password_confirm;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Ingresá un email válido.' });
+  }
+
+  if (!name) {
+    return res.status(400).json({ error: 'Ingresá tu nombre (mínimo 2 caracteres).' });
+  }
+
+  if (!customerAuth.isValidCustomerPassword(password)) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+  }
+
+  if (password !== passwordConfirm) {
+    return res.status(400).json({ error: 'Las contraseñas no coinciden.' });
+  }
+
+  try {
+    const { passwordHash, passwordSalt } = await auth.hashPassword(password);
+
+    const result = await pool.query(
+      `INSERT INTO customers (email, password_hash, password_salt, name, phone)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, email, name, phone`,
+      [email, passwordHash, passwordSalt, name, phone]
+    );
+
+    const customer = customerAuth.publicCustomer(result.rows[0]);
+    await claimAnonymousBookings(customer.id, customer.email);
+    await issueCustomerSession(res, customer.id);
+
+    return res.status(201).json({ customer });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ error: 'Ese email ya tiene una cuenta. Iniciá sesión.' });
+    }
+
+    console.error('Error registering customer:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/customer/auth/login', async (req, res) => {
+  const email = customerAuth.readCustomerEmail(req.body.email);
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Ingresá tu email y contraseña.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, email, name, phone, password_hash, password_salt, is_active
+       FROM customers
+       WHERE email = $1`,
+      [email]
+    );
+
+    const row = result.rows[0];
+    const ok =
+      row &&
+      row.is_active === true &&
+      (await auth.verifyPassword(password, row.password_salt, row.password_hash));
+
+    if (!ok) {
+      return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
+    }
+
+    const customer = customerAuth.publicCustomer(row);
+    await claimAnonymousBookings(customer.id, customer.email);
+    await issueCustomerSession(res, customer.id);
+
+    return res.json({ customer });
+  } catch (error) {
+    console.error('Error logging in customer:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/customer/auth/logout', async (req, res) => {
+  try {
+    const token = customerAuth.getCustomerSessionToken(req.headers.cookie);
+
+    if (token) {
+      await pool.query('DELETE FROM customer_sessions WHERE token_hash = $1', [
+        auth.hashToken(token),
+      ]);
+    }
+
+    res.setHeader(
+      'Set-Cookie',
+      customerAuth.clearCustomerSessionCookie(process.env.NODE_ENV === 'production')
+    );
+
+    return res.status(204).send();
+  } catch (error) {
+    console.error('Error logging out customer:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/customer/auth/me', requireCustomer, (req, res) => {
+  return res.json({ customer: (req as CustomerRequest).customer });
+});
+
+app.get('/api/customer/bookings', requireCustomer, listCustomerBookings(pool));
+
+app.post(
+  '/api/customer/bookings',
+  requireCustomer,
+  limitPublicHolds,
+  createCustomerBooking(pool)
+);
+
+app.post(
+  '/api/customer/bookings/:id/cancel',
+  requireCustomer,
+  cancelCustomerBooking(pool)
 );
 
 // Reservation-specific API routes

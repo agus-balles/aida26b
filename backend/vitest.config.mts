@@ -5,6 +5,7 @@ export default defineConfig({
     environment: 'node',
     include: [
       'test/auth.test.ts',
+      'test/customer.test.ts',
       'test/reservations.test.ts',
       'test/companyAccess.test.ts',
     ],

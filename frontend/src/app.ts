@@ -36,6 +36,24 @@ type CompanyLink = {
   role: 'owner' | 'manager' | 'staff' | 'viewer';
 };
 
+type CustomerAccount = {
+  id: number;
+  email: string;
+  name: string;
+  phone: string | null;
+};
+
+type CustomerBooking = {
+  id: number;
+  company_name: string;
+  court_name: string;
+  starts_at: string;
+  ends_at: string;
+  status: 'held' | 'confirmed' | 'cancelled' | 'expired';
+  price_total: number | string;
+  currency: string;
+};
+
 type AvailabilityStatus =
   | 'available'
   | 'held'
@@ -146,6 +164,7 @@ const logoutBtn = document.getElementById('logout-btn') as HTMLButtonElement;
 const homeBtn = document.getElementById('home-btn') as HTMLButtonElement;
 const loginNavBtn = document.getElementById('login-nav-btn') as HTMLButtonElement;
 const tourHelpBtn = document.getElementById('tour-help-btn') as HTMLButtonElement;
+const customerNavBtn = document.getElementById('customer-nav-btn') as HTMLButtonElement;
 const statusMessage = document.getElementById('status-message') as HTMLElement;
 
 const viewTitle = document.getElementById('view-title') as HTMLElement;
@@ -189,6 +208,7 @@ let permissionsNavButton: HTMLButtonElement | null = null;
 
 let currentUser: AuthUser | null = null;
 let currentCompanyLinks: CompanyLink[] = [];
+let currentCustomer: CustomerAccount | null = null;
 
 function canWriteBusiness(): boolean {
   return currentUser?.role === 'admin' || currentCompanyLinks.some(
@@ -223,6 +243,8 @@ function showPublicLanding(): void {
   loginError.hidden = true;
   loginNavBtn.hidden = false;
   tourHelpBtn.hidden = true;
+  customerNavBtn.hidden = false;
+  updateCustomerNav();
 }
 
 // Dedicated login view: only the login form, reached from the header button.
@@ -238,6 +260,7 @@ function showLogin(message = ''): void {
 
   loginNavBtn.hidden = true;
   tourHelpBtn.hidden = true;
+  customerNavBtn.hidden = true;
 
   loginError.textContent = message;
   loginError.hidden = !message;
@@ -253,6 +276,7 @@ function showPasswordChange(user: AuthUser, companyLinks: CompanyLink[]): void {
   appShell.style.display = 'none';
   loginNavBtn.hidden = true;
   tourHelpBtn.hidden = true;
+  customerNavBtn.hidden = true;
 
   passwordError.hidden = true;
 }
@@ -289,6 +313,7 @@ function showApp(user: AuthUser, companyLinks: CompanyLink[] = []): void {
   appShell.style.display = 'block';
   loginNavBtn.hidden = true;
   tourHelpBtn.hidden = false;
+  customerNavBtn.hidden = true;
 
   if (permissionsNavButton) {
     permissionsNavButton.hidden = user.role !== 'admin';
@@ -2155,6 +2180,8 @@ function renderBookingForm(
   title.textContent = `${court.name} · ${formatSlotTime(slot.starts_at)}`;
   form.appendChild(title);
 
+  const asCustomer = !!currentCustomer && !currentUser;
+
   const nameInput = document.createElement('input');
   const emailInput = document.createElement('input');
   const phoneInput = document.createElement('input');
@@ -2162,9 +2189,21 @@ function renderBookingForm(
   nameInput.required = true;
   emailInput.type = 'email';
 
-  appendAvailabilityControl(form, structure.commonText.customerName, nameInput);
-  appendAvailabilityControl(form, structure.commonText.customerEmail, emailInput, false);
-  appendAvailabilityControl(form, structure.commonText.customerPhone, phoneInput, false);
+  if (asCustomer) {
+    // Logged-in customer: identity comes from the account and the booking is
+    // confirmed immediately (no name/email fields, no 10-minute hold).
+    const note = document.createElement('p');
+    note.className = 'booking-customer-note';
+    note.textContent = getLocalizedText({
+      es: `Reservás como ${currentCustomer!.name}. Tu reserva queda confirmada al instante.`,
+      en: `Booking as ${currentCustomer!.name}. Your reservation is confirmed instantly.`,
+    });
+    form.appendChild(note);
+  } else {
+    appendAvailabilityControl(form, structure.commonText.customerName, nameInput);
+    appendAvailabilityControl(form, structure.commonText.customerEmail, emailInput, false);
+    appendAvailabilityControl(form, structure.commonText.customerPhone, phoneInput, false);
+  }
 
   const submitBtn = document.createElement('button');
   submitBtn.type = 'submit';
@@ -2175,6 +2214,35 @@ function renderBookingForm(
     event.preventDefault();
 
     try {
+      if (asCustomer) {
+        const customerResponse = await customerFetch('/customer/bookings', {
+          method: 'POST',
+          body: JSON.stringify({
+            company_id: companyId,
+            court_id: court.id,
+            sport_id: sportId,
+            starts_at: slot.starts_at,
+            duration_minutes: durationMinutes,
+          }),
+        });
+
+        if (!customerResponse.ok) {
+          panel.textContent = await errorMessage(customerResponse);
+          return;
+        }
+
+        panel.innerHTML = '';
+        const confirmedMessage = document.createElement('p');
+        confirmedMessage.className = 'booking-confirmed-message';
+        confirmedMessage.textContent = getLocalizedText({
+          es: '¡Reserva confirmada! La encontrás en «Mis reservas».',
+          en: 'Reservation confirmed! You can find it under "My bookings".',
+        });
+        panel.appendChild(confirmedMessage);
+        await refresh();
+        return;
+      }
+
       const response = await apiFetch('/bookings/hold', {
         method: 'POST',
         body: JSON.stringify({
@@ -4385,6 +4453,499 @@ function maybeStartOnboarding(user: AuthUser): void {
 }
 
 // -----------------------------------------------------------------------------
+// Customer (end-user) accounts: email-first login/signup + "Mis reservas"
+// -----------------------------------------------------------------------------
+
+async function customerFetch(path: string, options: RequestInit = {}): Promise<globalThis.Response> {
+  const headers = options.body
+    ? { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> | undefined) }
+    : options.headers;
+
+  return fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'same-origin' });
+}
+
+function updateCustomerNav(): void {
+  if (currentCustomer) {
+    const firstName = currentCustomer.name.split(' ')[0] || currentCustomer.name;
+    customerNavBtn.textContent = `${getLocalizedText({ es: 'Mis reservas', en: 'My bookings' })} · ${firstName}`;
+  } else {
+    customerNavBtn.textContent = getLocalizedText({
+      es: 'Ingresar / Registrarme',
+      en: 'Log in / Sign up',
+    });
+  }
+}
+
+async function restoreCustomerSession(): Promise<void> {
+  try {
+    const response = await customerFetch('/customer/auth/me');
+    if (!response.ok) return;
+    const data = (await response.json()) as { customer: CustomerAccount };
+    currentCustomer = data.customer;
+    updateCustomerNav();
+  } catch (error) {
+    console.error('Customer session check failed:', error);
+  }
+}
+
+async function customerLogout(): Promise<void> {
+  try {
+    await customerFetch('/customer/auth/logout', { method: 'POST' });
+  } catch (error) {
+    console.error('Customer logout failed:', error);
+  }
+  currentCustomer = null;
+  updateCustomerNav();
+}
+
+function formatBookingWhen(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(getLanguage() === 'es' ? 'es-AR' : 'en-US', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// Shared dismissable modal shell for the customer flows.
+function openCustomerModal(wide = false): { card: HTMLElement; close: () => void } {
+  const overlay = document.createElement('div');
+  overlay.className = 'customer-modal';
+
+  const card = document.createElement('div');
+  card.className = wide ? 'customer-modal__card customer-modal__card--wide' : 'customer-modal__card';
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-modal', 'true');
+  overlay.appendChild(card);
+
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') close();
+  };
+
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+
+  return { card, close };
+}
+
+function customerLabeledInput(
+  labelText: string,
+  type = 'text',
+  autocomplete?: string
+): { field: HTMLElement; input: HTMLInputElement } {
+  const field = document.createElement('label');
+  field.className = 'customer-field';
+
+  const span = document.createElement('span');
+  span.textContent = labelText;
+  field.appendChild(span);
+
+  const input = document.createElement('input');
+  input.type = type;
+  if (autocomplete) input.setAttribute('autocomplete', autocomplete);
+  field.appendChild(input);
+
+  return { field, input };
+}
+
+function openCustomerAuthModal(): void {
+  const { card, close } = openCustomerModal();
+  renderCustomerEmailStep(card, close);
+}
+
+function renderCustomerEmailStep(card: HTMLElement, close: () => void): void {
+  card.innerHTML = '';
+
+  const title = document.createElement('h2');
+  title.textContent = getLocalizedText({ es: 'Ingresá o creá tu cuenta', en: 'Log in or create your account' });
+  card.appendChild(title);
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'customer-modal__subtitle';
+  subtitle.textContent = getLocalizedText({
+    es: 'Con tu cuenta podés ver, cancelar y hacer nuevas reservas.',
+    en: 'With your account you can view, cancel and make new bookings.',
+  });
+  card.appendChild(subtitle);
+
+  const form = document.createElement('form');
+  const { field, input } = customerLabeledInput(
+    getLocalizedText({ es: 'Email', en: 'Email' }),
+    'email',
+    'email'
+  );
+  input.required = true;
+  form.appendChild(field);
+
+  const error = document.createElement('p');
+  error.className = 'customer-modal__error';
+  error.hidden = true;
+  form.appendChild(error);
+
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'customer-modal__primary';
+  submit.textContent = getLocalizedText({ es: 'Continuar', en: 'Continue' });
+  form.appendChild(submit);
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    const email = input.value.trim();
+
+    try {
+      const response = await customerFetch('/customer/auth/check-email', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        error.textContent = await errorMessage(response);
+        error.hidden = false;
+        return;
+      }
+
+      const data = (await response.json()) as { exists: boolean };
+
+      if (data.exists) {
+        renderCustomerLoginStep(card, close, email);
+      } else {
+        renderCustomerRegisterStep(card, close, email);
+      }
+    } catch (err) {
+      error.textContent = getLocalizedText({ es: 'No se pudo continuar. Intentá de nuevo.', en: 'Could not continue. Try again.' });
+      error.hidden = false;
+      console.error('check-email failed:', err);
+    }
+  });
+
+  card.appendChild(form);
+  input.focus();
+}
+
+function customerBackLink(card: HTMLElement, close: () => void, email: string): HTMLElement {
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'customer-modal__link';
+  back.textContent = getLocalizedText({ es: '← Usar otro email', en: '← Use another email' });
+  back.addEventListener('click', () => renderCustomerEmailStep(card, close));
+  return back;
+}
+
+async function onCustomerAuthenticated(customer: CustomerAccount, close: () => void): Promise<void> {
+  currentCustomer = customer;
+  updateCustomerNav();
+  close();
+  await openCustomerBookings();
+}
+
+function renderCustomerLoginStep(card: HTMLElement, close: () => void, email: string): void {
+  card.innerHTML = '';
+
+  const title = document.createElement('h2');
+  title.textContent = getLocalizedText({ es: 'Ingresá', en: 'Log in' });
+  card.appendChild(title);
+
+  const hint = document.createElement('p');
+  hint.className = 'customer-modal__subtitle';
+  hint.textContent = `${email}`;
+  card.appendChild(hint);
+
+  const form = document.createElement('form');
+  const { field, input } = customerLabeledInput(
+    getLocalizedText({ es: 'Contraseña', en: 'Password' }),
+    'password',
+    'current-password'
+  );
+  input.required = true;
+  form.appendChild(field);
+
+  const error = document.createElement('p');
+  error.className = 'customer-modal__error';
+  error.hidden = true;
+  form.appendChild(error);
+
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'customer-modal__primary';
+  submit.textContent = getLocalizedText({ es: 'Ingresar', en: 'Log in' });
+  form.appendChild(submit);
+  form.appendChild(customerBackLink(card, close, email));
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+
+    try {
+      const response = await customerFetch('/customer/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password: input.value }),
+      });
+
+      if (!response.ok) {
+        error.textContent = await errorMessage(response);
+        error.hidden = false;
+        return;
+      }
+
+      const data = (await response.json()) as { customer: CustomerAccount };
+      await onCustomerAuthenticated(data.customer, close);
+    } catch (err) {
+      error.textContent = getLocalizedText({ es: 'No se pudo iniciar sesión.', en: 'Could not log in.' });
+      error.hidden = false;
+      console.error('customer login failed:', err);
+    }
+  });
+
+  card.appendChild(form);
+  input.focus();
+}
+
+function renderCustomerRegisterStep(card: HTMLElement, close: () => void, email: string): void {
+  card.innerHTML = '';
+
+  const title = document.createElement('h2');
+  title.textContent = getLocalizedText({ es: 'Creá tu cuenta', en: 'Create your account' });
+  card.appendChild(title);
+
+  const hint = document.createElement('p');
+  hint.className = 'customer-modal__subtitle';
+  hint.textContent = getLocalizedText({
+    es: `Es tu primera vez con ${email}. Elegí una contraseña.`,
+    en: `First time with ${email}. Choose a password.`,
+  });
+  card.appendChild(hint);
+
+  const form = document.createElement('form');
+
+  const name = customerLabeledInput(getLocalizedText({ es: 'Nombre y apellido', en: 'Full name' }), 'text', 'name');
+  name.input.required = true;
+  form.appendChild(name.field);
+
+  const phone = customerLabeledInput(getLocalizedText({ es: 'Teléfono (opcional)', en: 'Phone (optional)' }), 'tel', 'tel');
+  form.appendChild(phone.field);
+
+  const password = customerLabeledInput(getLocalizedText({ es: 'Contraseña (mín. 8)', en: 'Password (min. 8)' }), 'password', 'new-password');
+  password.input.required = true;
+  form.appendChild(password.field);
+
+  const confirm = customerLabeledInput(getLocalizedText({ es: 'Repetí la contraseña', en: 'Repeat password' }), 'password', 'new-password');
+  confirm.input.required = true;
+  form.appendChild(confirm.field);
+
+  const error = document.createElement('p');
+  error.className = 'customer-modal__error';
+  error.hidden = true;
+  form.appendChild(error);
+
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'customer-modal__primary';
+  submit.textContent = getLocalizedText({ es: 'Crear cuenta', en: 'Create account' });
+  form.appendChild(submit);
+  form.appendChild(customerBackLink(card, close, email));
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+
+    if (password.input.value.length < 8) {
+      error.textContent = getLocalizedText({ es: 'La contraseña debe tener al menos 8 caracteres.', en: 'Password must be at least 8 characters.' });
+      error.hidden = false;
+      return;
+    }
+
+    if (password.input.value !== confirm.input.value) {
+      error.textContent = getLocalizedText({ es: 'Las contraseñas no coinciden.', en: 'Passwords do not match.' });
+      error.hidden = false;
+      return;
+    }
+
+    try {
+      const response = await customerFetch('/customer/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          email,
+          name: name.input.value,
+          phone: phone.input.value,
+          password: password.input.value,
+          password_confirm: confirm.input.value,
+        }),
+      });
+
+      if (!response.ok) {
+        error.textContent = await errorMessage(response);
+        error.hidden = false;
+        return;
+      }
+
+      const data = (await response.json()) as { customer: CustomerAccount };
+      await onCustomerAuthenticated(data.customer, close);
+    } catch (err) {
+      error.textContent = getLocalizedText({ es: 'No se pudo crear la cuenta.', en: 'Could not create the account.' });
+      error.hidden = false;
+      console.error('customer register failed:', err);
+    }
+  });
+
+  card.appendChild(form);
+  name.input.focus();
+}
+
+async function openCustomerBookings(): Promise<void> {
+  if (!currentCustomer) {
+    openCustomerAuthModal();
+    return;
+  }
+
+  const { card, close } = openCustomerModal(true);
+
+  const header = document.createElement('div');
+  header.className = 'customer-modal__header';
+
+  const heading = document.createElement('div');
+  const title = document.createElement('h2');
+  title.textContent = getLocalizedText({ es: 'Mis reservas', en: 'My bookings' });
+  heading.appendChild(title);
+  const greeting = document.createElement('p');
+  greeting.className = 'customer-modal__subtitle';
+  greeting.textContent = `${getLocalizedText({ es: 'Hola', en: 'Hi' })}, ${currentCustomer.name}`;
+  heading.appendChild(greeting);
+  header.appendChild(heading);
+
+  const logoutBtnEl = document.createElement('button');
+  logoutBtnEl.type = 'button';
+  logoutBtnEl.className = 'customer-modal__link';
+  logoutBtnEl.textContent = getLocalizedText({ es: 'Salir', en: 'Log out' });
+  logoutBtnEl.addEventListener('click', async () => {
+    await customerLogout();
+    close();
+  });
+  header.appendChild(logoutBtnEl);
+
+  card.appendChild(header);
+
+  const reserveBtn = document.createElement('button');
+  reserveBtn.type = 'button';
+  reserveBtn.className = 'customer-modal__primary';
+  reserveBtn.textContent = getLocalizedText({ es: 'Reservar una cancha', en: 'Book a court' });
+  reserveBtn.addEventListener('click', () => {
+    close();
+    publicBookingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  card.appendChild(reserveBtn);
+
+  const list = document.createElement('div');
+  list.className = 'customer-bookings';
+  card.appendChild(list);
+
+  await renderCustomerBookingsList(list);
+}
+
+async function renderCustomerBookingsList(list: HTMLElement): Promise<void> {
+  list.innerHTML = '';
+  const loading = document.createElement('p');
+  loading.textContent = getLocalizedText({ es: 'Cargando…', en: 'Loading…' });
+  list.appendChild(loading);
+
+  let bookings: CustomerBooking[] = [];
+  try {
+    const response = await customerFetch('/customer/bookings');
+    if (!response.ok) {
+      list.innerHTML = '';
+      list.textContent = await errorMessage(response);
+      return;
+    }
+    const data = (await response.json()) as { data: CustomerBooking[] };
+    bookings = data.data;
+  } catch (error) {
+    list.innerHTML = '';
+    list.textContent = getLocalizedText({ es: 'No se pudieron cargar tus reservas.', en: 'Could not load your bookings.' });
+    console.error('load customer bookings failed:', error);
+    return;
+  }
+
+  list.innerHTML = '';
+
+  if (bookings.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'customer-bookings__empty';
+    empty.textContent = getLocalizedText({
+      es: 'Todavía no tenés reservas. ¡Reservá tu primera cancha!',
+      en: "You don't have any bookings yet. Book your first court!",
+    });
+    list.appendChild(empty);
+    return;
+  }
+
+  const now = Date.now();
+
+  bookings.forEach((booking) => {
+    const item = document.createElement('div');
+    item.className = 'customer-booking';
+
+    const info = document.createElement('div');
+    info.className = 'customer-booking__info';
+
+    const where = document.createElement('strong');
+    where.textContent = `${booking.court_name} · ${booking.company_name}`;
+    info.appendChild(where);
+
+    const when = document.createElement('span');
+    when.textContent = formatBookingWhen(booking.starts_at);
+    info.appendChild(when);
+
+    const meta = document.createElement('span');
+    meta.className = 'customer-booking__meta';
+    const price = `${booking.currency} ${Number(booking.price_total).toLocaleString(getLanguage() === 'es' ? 'es-AR' : 'en-US')}`;
+    meta.textContent = `${bookingStatusLabel(booking.status)} · ${price}`;
+    info.appendChild(meta);
+
+    item.appendChild(info);
+
+    const cancellable =
+      (booking.status === 'held' || booking.status === 'confirmed') &&
+      new Date(booking.starts_at).getTime() > now;
+
+    if (cancellable) {
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'customer-booking__cancel';
+      cancelBtn.textContent = getLocalizedText({ es: 'Cancelar', en: 'Cancel' });
+      cancelBtn.addEventListener('click', async () => {
+        cancelBtn.disabled = true;
+        try {
+          const response = await customerFetch(`/customer/bookings/${booking.id}/cancel`, { method: 'POST' });
+          if (!response.ok) {
+            cancelBtn.disabled = false;
+            showErrorMessage(await errorMessage(response));
+            return;
+          }
+          await renderCustomerBookingsList(list);
+        } catch (error) {
+          cancelBtn.disabled = false;
+          console.error('cancel booking failed:', error);
+        }
+      });
+      item.appendChild(cancelBtn);
+    }
+
+    list.appendChild(item);
+  });
+}
+
+// -----------------------------------------------------------------------------
 // Initialization
 // -----------------------------------------------------------------------------
 
@@ -4398,6 +4959,14 @@ homeBtn.addEventListener('click', goHome);
 loginNavBtn.addEventListener('click', () => showLogin());
 
 tourHelpBtn.addEventListener('click', () => startOnboardingTour(true));
+
+customerNavBtn.addEventListener('click', () => {
+  if (currentCustomer) {
+    void openCustomerBookings();
+  } else {
+    openCustomerAuthModal();
+  }
+});
 
 changePasswordBtn.addEventListener('click', () => {
   if (currentUser) showPasswordChange(currentUser, currentCompanyLinks);
@@ -4495,6 +5064,7 @@ async function initialize(): Promise<void> {
   syncUrlToState();
   applyLanguageToUI();
   void renderAvailabilityControls(publicBookingSection, false);
+  void restoreCustomerSession();
 
   try {
     const response = await fetch(`${API_BASE}/auth/me`, {

@@ -4,6 +4,9 @@ import type { AuthUser } from './auth';
 
 type AuthedRequest = Request & { user?: AuthUser };
 
+type CustomerIdentity = { id: number; name: string; email: string; phone: string | null };
+type CustomerRequest = Request & { customer?: CustomerIdentity };
+
 type Queryable = Pool | PoolClient;
 
 type CourtRow = {
@@ -934,6 +937,99 @@ async function fetchLockedIdsForCourts(
   return result.rows.map((row) => Number(row.court_id));
 }
 
+type PreparedSlot = {
+  court: Awaited<ReturnType<typeof fetchSelectedCourt>>;
+  affectedCourtIds: number[];
+  endsAt: Date;
+  price: NonNullable<ReturnType<typeof priceForCourt>>;
+};
+
+// Shared reservation core: validates the slot, serialises overlapping attempts
+// with an advisory lock, rejects conflicts/compaction alternatives and resolves
+// the price. Callers must already be inside a transaction on `client` and are
+// responsible for the INSERT (status/customer differ per caller).
+async function prepareSlot(
+  client: PoolClient,
+  input: {
+    companyId: number;
+    courtId: number;
+    sportId: number;
+    durationMinutes: number;
+    startsAt: Date;
+  }
+): Promise<PreparedSlot> {
+  const { companyId, courtId, sportId, durationMinutes, startsAt } = input;
+  const endsAt = addMinutes(startsAt, durationMinutes);
+
+  await expireHeldBookings(client);
+  await validateTimeBlock(client, companyId, durationMinutes);
+
+  // Constrain starts_at to the company's slot grid (local time). Besides
+  // rejecting arbitrary times, this keeps every booking inside a single
+  // local day, so two overlapping holds on the same court always share the
+  // advisory-lock key and serialise even if btree_gist is unavailable.
+  const timeZone = await fetchCompanyTimeZone(client, companyId);
+  const localDate = zonedDateKey(startsAt, timeZone);
+  const gridSlots = buildSlots(localDate, durationMinutes, timeZone);
+
+  if (!gridSlots.some((slot) => slot.startsAt.getTime() === startsAt.getTime())) {
+    throw new HttpError(400, { error: 'El horario elegido no está disponible para reservar.' });
+  }
+
+  const court = await fetchSelectedCourt(client, companyId, courtId, sportId);
+  const rootCourtId = court.root_court_id ?? court.id;
+
+  await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [
+    advisoryLockKey(rootCourtId, startsAt),
+  ]);
+
+  const courts = await fetchCourtTree(client, companyId, rootCourtId);
+  const affectedCourtIds = getAtomicCourtIds(courts, court.id);
+  const overlapping = await fetchLockedIdsForCourts(client, affectedCourtIds, startsAt, endsAt);
+
+  if (overlapping.length > 0) {
+    throw new HttpError(409, { error: 'Ese horario acaba de dejar de estar disponible. Elegí otro.' });
+  }
+
+  const allRootAtomicIds = courts.flatMap((candidate) => getAtomicCourtIds(courts, candidate.id));
+  const lockedIds = new Set(await fetchLockedIdsForCourts(client, [...new Set(allRootAtomicIds)], startsAt, endsAt));
+  const alternatives = findCompactionAlternatives(courts, lockedIds, court.id);
+
+  if (alternatives.length > 0) {
+    throw new HttpError(409, {
+      error: 'Elegí una de las canchas sugeridas para aprovechar mejor el espacio disponible.',
+      alternatives,
+    });
+  }
+
+  const prices = await fetchPrices(client, courts.map((candidate) => candidate.id), sportId, localDate);
+  const price = priceForCourt(court, courts, prices, durationMinutes);
+
+  if (!price) {
+    throw new HttpError(400, {
+      error: 'La cancha elegida no tiene un precio configurado para ese deporte.',
+    });
+  }
+
+  return { court, affectedCourtIds, endsAt, price };
+}
+
+async function insertBookingLocks(
+  client: PoolClient,
+  bookingId: number,
+  atomicCourtIds: number[],
+  startsAt: Date,
+  endsAt: Date
+): Promise<void> {
+  for (const atomicCourtId of atomicCourtIds) {
+    await client.query(
+      `INSERT INTO booking_locks (booking_id, court_id, starts_at, ends_at)
+       VALUES ($1, $2, $3, $4)`,
+      [bookingId, atomicCourtId, startsAt, endsAt]
+    );
+  }
+}
+
 export function holdBooking(pool: Pool) {
   return async (req: Request, res: Response) => {
     const client = await pool.connect();
@@ -944,7 +1040,6 @@ export function holdBooking(pool: Pool) {
       const sportId = readPositiveInteger(req.body.sport_id, 'sport_id');
       const durationMinutes = readPositiveInteger(req.body.duration_minutes, 'duration_minutes');
       const startsAt = readDate(req.body.starts_at, 'starts_at');
-      const endsAt = addMinutes(startsAt, durationMinutes);
       const customerName = stringValue(req.body.customer_name);
       const customerEmail = stringValue(req.body.customer_email) || null;
       const customerPhone = stringValue(req.body.customer_phone) || null;
@@ -954,55 +1049,13 @@ export function holdBooking(pool: Pool) {
       }
 
       await client.query('BEGIN');
-      await expireHeldBookings(client);
-      await validateTimeBlock(client, companyId, durationMinutes);
-
-      // Constrain starts_at to the company's slot grid (local time). Besides
-      // rejecting arbitrary times, this keeps every booking inside a single
-      // local day, so two overlapping holds on the same court always share the
-      // advisory-lock key and serialise even if btree_gist is unavailable.
-      const timeZone = await fetchCompanyTimeZone(client, companyId);
-      const localDate = zonedDateKey(startsAt, timeZone);
-      const gridSlots = buildSlots(localDate, durationMinutes, timeZone);
-
-      if (!gridSlots.some((slot) => slot.startsAt.getTime() === startsAt.getTime())) {
-        throw new HttpError(400, { error: 'El horario elegido no está disponible para reservar.' });
-      }
-
-      const court = await fetchSelectedCourt(client, companyId, courtId, sportId);
-      const rootCourtId = court.root_court_id ?? court.id;
-
-      await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [
-        advisoryLockKey(rootCourtId, startsAt),
-      ]);
-
-      const courts = await fetchCourtTree(client, companyId, rootCourtId);
-      const affectedCourtIds = getAtomicCourtIds(courts, court.id);
-      const overlapping = await fetchLockedIdsForCourts(client, affectedCourtIds, startsAt, endsAt);
-
-      if (overlapping.length > 0) {
-        throw new HttpError(409, { error: 'Ese horario acaba de dejar de estar disponible. Elegí otro.' });
-      }
-
-      const allRootAtomicIds = courts.flatMap((candidate) => getAtomicCourtIds(courts, candidate.id));
-      const lockedIds = new Set(await fetchLockedIdsForCourts(client, [...new Set(allRootAtomicIds)], startsAt, endsAt));
-      const alternatives = findCompactionAlternatives(courts, lockedIds, court.id);
-
-      if (alternatives.length > 0) {
-        throw new HttpError(409, {
-          error: 'Elegí una de las canchas sugeridas para aprovechar mejor el espacio disponible.',
-          alternatives,
-        });
-      }
-
-      const prices = await fetchPrices(client, courts.map((candidate) => candidate.id), sportId, localDate);
-      const price = priceForCourt(court, courts, prices, durationMinutes);
-
-      if (!price) {
-        throw new HttpError(400, {
-          error: 'La cancha elegida no tiene un precio configurado para ese deporte.',
-        });
-      }
+      const { court, affectedCourtIds, endsAt, price } = await prepareSlot(client, {
+        companyId,
+        courtId,
+        sportId,
+        durationMinutes,
+        startsAt,
+      });
 
       const createdBy = (req as AuthedRequest).user?.id ?? null;
 
@@ -1029,13 +1082,7 @@ export function holdBooking(pool: Pool) {
         ]
       );
 
-      for (const atomicCourtId of affectedCourtIds) {
-        await client.query(
-          `INSERT INTO booking_locks (booking_id, court_id, starts_at, ends_at)
-           VALUES ($1, $2, $3, $4)`,
-          [booking.rows[0].id, atomicCourtId, startsAt, endsAt]
-        );
-      }
+      await insertBookingLocks(client, booking.rows[0].id, affectedCourtIds, startsAt, endsAt);
 
       await client.query('COMMIT');
 
@@ -1043,6 +1090,160 @@ export function holdBooking(pool: Pool) {
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
       return sendReservationError(res, error, 'Error holding booking');
+    } finally {
+      client.release();
+    }
+  };
+}
+
+// A logged-in customer books directly as 'confirmed' (no 10-minute hold): the
+// booking is theirs to see/cancel from "Mis reservas". Identity comes from the
+// authenticated customer, not the request body.
+export function createCustomerBooking(pool: Pool) {
+  return async (req: Request, res: Response) => {
+    const customer = (req as CustomerRequest).customer;
+
+    if (!customer) {
+      return res.status(401).json({ error: 'Necesitás iniciar sesión.' });
+    }
+
+    const client = await pool.connect();
+
+    try {
+      const companyId = readPositiveInteger(req.body.company_id, 'company_id');
+      const courtId = readPositiveInteger(req.body.court_id, 'court_id');
+      const sportId = readPositiveInteger(req.body.sport_id, 'sport_id');
+      const durationMinutes = readPositiveInteger(req.body.duration_minutes, 'duration_minutes');
+      const startsAt = readDate(req.body.starts_at, 'starts_at');
+
+      await client.query('BEGIN');
+      const { court, affectedCourtIds, endsAt, price } = await prepareSlot(client, {
+        companyId,
+        courtId,
+        sportId,
+        durationMinutes,
+        startsAt,
+      });
+
+      const booking = await client.query(
+        `INSERT INTO bookings
+         (company_id, court_id, sport_id, starts_at, ends_at, status,
+          customer_name, customer_email, customer_phone, price_total, currency,
+          hold_expires_at, created_by_user_id, customer_id)
+         VALUES ($1, $2, $3, $4, $5, 'confirmed', $6, $7, $8, $9, $10,
+                 NULL, NULL, $11)
+         RETURNING *`,
+        [
+          companyId,
+          court.id,
+          sportId,
+          startsAt,
+          endsAt,
+          customer.name,
+          customer.email,
+          customer.phone,
+          price.price_total,
+          price.currency,
+          customer.id,
+        ]
+      );
+
+      await insertBookingLocks(client, booking.rows[0].id, affectedCourtIds, startsAt, endsAt);
+
+      await client.query('COMMIT');
+
+      return res.status(201).json({ booking: booking.rows[0] });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      return sendReservationError(res, error, 'Error creating customer booking');
+    } finally {
+      client.release();
+    }
+  };
+}
+
+export function listCustomerBookings(pool: Pool) {
+  return async (req: Request, res: Response) => {
+    const customer = (req as CustomerRequest).customer;
+
+    if (!customer) {
+      return res.status(401).json({ error: 'Necesitás iniciar sesión.' });
+    }
+
+    try {
+      await expireHeldBookings(pool);
+
+      const result = await pool.query(
+        `SELECT b.id, b.company_id, co.name AS company_name, b.court_id, c.name AS court_name,
+                b.sport_id, b.starts_at, b.ends_at, b.status, b.price_total, b.currency,
+                b.created_at
+         FROM bookings b
+         JOIN courts c ON c.id = b.court_id
+         JOIN companies co ON co.id = b.company_id
+         WHERE b.customer_id = $1
+           AND b.status IN ('held', 'confirmed', 'cancelled')
+         ORDER BY b.starts_at DESC`,
+        [customer.id]
+      );
+
+      return res.json({ data: result.rows });
+    } catch (error) {
+      return sendReservationError(res, error, 'Error listing customer bookings');
+    }
+  };
+}
+
+// Customers cancel their own future bookings. Ownership is checked against
+// customer_id and the slot must still be in the future.
+export function cancelCustomerBooking(pool: Pool) {
+  return async (req: Request, res: Response) => {
+    const customer = (req as CustomerRequest).customer;
+
+    if (!customer) {
+      return res.status(401).json({ error: 'Necesitás iniciar sesión.' });
+    }
+
+    const client = await pool.connect();
+
+    try {
+      const bookingId = readPositiveInteger(req.params.id, 'id');
+
+      await client.query('BEGIN');
+
+      const current = await client.query(
+        `SELECT * FROM bookings WHERE id = $1 FOR UPDATE`,
+        [bookingId]
+      );
+
+      const booking = current.rows[0];
+
+      if (current.rowCount === 0 || Number(booking.customer_id) !== customer.id) {
+        throw new HttpError(404, { error: 'La reserva no está disponible.' });
+      }
+
+      if (booking.status !== 'held' && booking.status !== 'confirmed') {
+        throw new HttpError(409, { error: 'La reserva ya no se puede cancelar.' });
+      }
+
+      if (new Date(booking.starts_at).getTime() <= Date.now()) {
+        throw new HttpError(409, { error: 'No se puede cancelar una reserva que ya comenzó.' });
+      }
+
+      await client.query('DELETE FROM booking_locks WHERE booking_id = $1', [bookingId]);
+
+      const updated = await client.query(
+        `UPDATE bookings
+         SET status = 'cancelled', updated_at = now()
+         WHERE id = $1
+         RETURNING *`,
+        [bookingId]
+      );
+
+      await client.query('COMMIT');
+      return res.json({ booking: updated.rows[0] });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      return sendReservationError(res, error, 'Error cancelling customer booking');
     } finally {
       client.release();
     }
