@@ -1,8 +1,11 @@
 # Sistema Multiempresa de Reservas de Canchas
 
-Este proyecto implementa una plataforma para gestionar empresas deportivas,
-canchas, particiones de canchas, precios, bloques de reserva y reservas con
-bloqueo transaccional.
+Proyecto final del taller de la materia **Bases de Datos**, realizado por **Ema Sapirstein, Franco Valentino Grasso, Agustín Ballesteros y Julieta Cavalieri**.
+
+El proyecto parte de un trabajo desarrollado colaborativamente por el curso y lo adaptamos a un sistema multiempresa para la administración y reserva de canchas deportivas. La plataforma permite gestionar empresas deportivas, canchas y sus particiones, precios, bloques horarios y reservas con mecanismos de bloqueo transaccional.
+
+La explicación detallada de las funcionalidades implementadas, el modelo de datos, las decisiones tomadas y el proceso de desarrollo se encuentran en [REPORTE_PROYECTO.md](./REPORTE_PROYECTO.md) .
+
 
 ## Características
 
